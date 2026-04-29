@@ -10,14 +10,17 @@ async def upsert_major_admission_result(conn: asyncpg.Connection, data: dict) ->
         """
         INSERT INTO major_admission_results (
             school_id, major_id, province_id, year, subject_category_id, batch,
+            batch_category, batch_segment,
             min_score, min_rank, avg_score, avg_rank, max_score, max_rank,
             admitted_count, school_code_raw, school_name_raw, major_group_code,
             major_code_raw, campus, major_name_raw, subject_category_raw, batch_raw,
             remark, source_url, data_source, source_updated_at, quality_flags,
             content_hash, crawl_task_id
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
         ON CONFLICT (school_id, major_id, province_id, year, subject_category_id, batch) DO UPDATE SET
+            batch_category=EXCLUDED.batch_category,
+            batch_segment=EXCLUDED.batch_segment,
             min_score=EXCLUDED.min_score,
             min_rank=EXCLUDED.min_rank,
             avg_score=EXCLUDED.avg_score,
@@ -48,6 +51,8 @@ async def upsert_major_admission_result(conn: asyncpg.Connection, data: dict) ->
         data["year"],
         data.get("subject_category_id"),
         data["batch"],
+        data.get("batch_category"),
+        data.get("batch_segment"),
         data.get("min_score"),
         data.get("min_rank"),
         data.get("avg_score"),

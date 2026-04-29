@@ -12,6 +12,7 @@ from gaokao_vault.constants import BASE_URL, TaskType
 from gaokao_vault.db.queries.admission import upsert_major_admission_result
 from gaokao_vault.db.queries.majors import find_major_by_code, find_major_by_source_id, find_majors_by_name
 from gaokao_vault.models.admission import MajorAdmissionResultItem
+from gaokao_vault.pipeline.batch_normalizer import normalize_batch
 from gaokao_vault.pipeline.quality import missing_field_flags
 from gaokao_vault.pipeline.validator import validate_item
 from gaokao_vault.spiders.base import BaseGaokaoSpider
@@ -214,6 +215,7 @@ class MajorAdmissionResultSpider(BaseGaokaoSpider):
                     continue
 
                 subject_category_id = await self._resolve_subject_category(subject_category_raw or "")
+                batch_info = normalize_batch(batch_raw)
                 min_score = _parse_int(_cell_text(cells, min_score_idx) or "")
                 min_rank = _parse_int(_cell_text(cells, min_rank_idx) or "")
                 avg_score = _parse_int(_cell_text(cells, avg_score_idx) or "")
@@ -226,6 +228,8 @@ class MajorAdmissionResultSpider(BaseGaokaoSpider):
                     "year": year,
                     "subject_category_id": subject_category_id,
                     "batch": batch_raw,
+                    "batch_category": batch_info.category,
+                    "batch_segment": batch_info.segment,
                     "min_score": min_score,
                     "min_rank": min_rank,
                     "avg_score": avg_score,

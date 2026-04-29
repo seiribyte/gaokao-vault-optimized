@@ -12,6 +12,8 @@ class MajorAdmissionResultItem(BaseModel):
     year: int = Field(ge=2000, le=2100)
     subject_category_id: int | None = None
     batch: str
+    batch_category: str | None = None
+    batch_segment: str | None = None
     min_score: int | None = None
     min_rank: int | None = None
     avg_score: int | None = None

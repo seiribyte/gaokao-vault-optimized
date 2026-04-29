@@ -292,6 +292,8 @@ CREATE TABLE IF NOT EXISTS enrollment_plans (
     year            SMALLINT NOT NULL,
     subject_category_id INTEGER REFERENCES subject_categories(id),
     batch           VARCHAR(50),
+    batch_category  VARCHAR(30),
+    batch_segment   VARCHAR(30),
     major_name      VARCHAR(100),
     major_id        BIGINT REFERENCES majors(id),
     plan_count      INTEGER,
@@ -321,6 +323,8 @@ CREATE INDEX IF NOT EXISTS idx_plans_province_year ON enrollment_plans(province_
 CREATE INDEX IF NOT EXISTS idx_plans_major ON enrollment_plans(major_id) WHERE major_id IS NOT NULL;
 
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS major_group_code VARCHAR(50);
+ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS batch_category VARCHAR(30);
+ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS batch_segment VARCHAR(30);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS major_code_raw VARCHAR(50);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS campus VARCHAR(100);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS education_location VARCHAR(100);
@@ -344,6 +348,8 @@ CREATE TABLE IF NOT EXISTS major_admission_results (
     year            SMALLINT NOT NULL,
     subject_category_id INTEGER REFERENCES subject_categories(id),
     batch           VARCHAR(50) NOT NULL,
+    batch_category  VARCHAR(30),
+    batch_segment   VARCHAR(30),
     min_score       INTEGER,
     min_rank        INTEGER,
     avg_score       INTEGER,
@@ -377,6 +383,8 @@ CREATE INDEX IF NOT EXISTS idx_major_admission_major
     ON major_admission_results(major_id);
 
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS school_code_raw VARCHAR(50);
+ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS batch_category VARCHAR(30);
+ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS batch_segment VARCHAR(30);
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS school_name_raw VARCHAR(100);
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS major_group_code VARCHAR(50);
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS major_code_raw VARCHAR(50);
@@ -445,6 +453,13 @@ CREATE TABLE IF NOT EXISTS special_enrollments (
     content         TEXT,
     publish_date    DATE,
     source_url      VARCHAR(255),
+    application_url VARCHAR(255),
+    registration_start DATE,
+    registration_end DATE,
+    selection_rule  TEXT,
+    admission_rule  TEXT,
+    eligible_majors JSONB NOT NULL DEFAULT '[]'::jsonb,
+    quality_flags   JSONB NOT NULL DEFAULT '[]'::jsonb,
     content_hash    VARCHAR(64),
     crawl_task_id   BIGINT REFERENCES crawl_tasks(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -454,6 +469,14 @@ CREATE TABLE IF NOT EXISTS special_enrollments (
 
 CREATE INDEX IF NOT EXISTS idx_special_type_year ON special_enrollments(enrollment_type, year);
 CREATE INDEX IF NOT EXISTS idx_special_school ON special_enrollments(school_id);
+
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS application_url VARCHAR(255);
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS registration_start DATE;
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS registration_end DATE;
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS selection_rule TEXT;
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS admission_rule TEXT;
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS eligible_majors JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS quality_flags JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 DROP TRIGGER IF EXISTS update_special_enrollments_updated_at ON special_enrollments;
 CREATE TRIGGER update_special_enrollments_updated_at BEFORE UPDATE ON special_enrollments

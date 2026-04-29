@@ -9,13 +9,15 @@ async def upsert_enrollment_plan(conn: asyncpg.Connection, data: dict) -> int:
     row = await conn.fetchrow(
         """
         INSERT INTO enrollment_plans (school_id, province_id, year, subject_category_id,
-            batch, major_name, major_id, plan_count, duration, tuition, note,
+            batch, batch_category, batch_segment, major_name, major_id, plan_count, duration, tuition, note,
             major_group_code, major_code_raw, campus, education_location,
             selection_requirement, physical_exam_limit, single_subject_limit,
             adjustment_rule, data_source, source_updated_at, quality_flags,
             content_hash, crawl_task_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
         ON CONFLICT (school_id, province_id, year, subject_category_id, batch, major_name) DO UPDATE SET
+            batch_category=EXCLUDED.batch_category,
+            batch_segment=EXCLUDED.batch_segment,
             major_id=EXCLUDED.major_id,
             plan_count=EXCLUDED.plan_count,
             duration=EXCLUDED.duration,
@@ -41,6 +43,8 @@ async def upsert_enrollment_plan(conn: asyncpg.Connection, data: dict) -> int:
         data["year"],
         data.get("subject_category_id"),
         data.get("batch"),
+        data.get("batch_category"),
+        data.get("batch_segment"),
         data.get("major_name"),
         data.get("major_id"),
         data.get("plan_count"),

@@ -30,6 +30,8 @@ def test_upsert_enrollment_plan_preserves_rule_and_quality_fields() -> None:
                 "year": 2025,
                 "subject_category_id": 3,
                 "batch": "本科批",
+                "batch_category": "普通批",
+                "batch_segment": None,
                 "major_name": "计算机科学与技术",
                 "major_group_code": "01",
                 "major_code_raw": "080901",
@@ -49,6 +51,8 @@ def test_upsert_enrollment_plan_preserves_rule_and_quality_fields() -> None:
     assert "enrollment_plans" in conn.query
     assert "major_group_code" in conn.query
     assert "selection_requirement" in conn.query
+    assert "batch_category" in conn.query
     assert "01" in conn.args
+    assert "普通批" in conn.args
     assert "物理+化学" in conn.args
     assert json.dumps([], ensure_ascii=False) in conn.args

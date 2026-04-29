@@ -142,7 +142,7 @@ _ENRICHED_ADMISSION_HTML = """
         <td>080901</td>
         <td><a href="/sch/major--code-080901.dhtml">计算机科学与技术</a></td>
         <td>物理类</td>
-        <td>本科批</td>
+        <td>提前批普通类A段</td>
         <td>612</td>
         <td>3456</td>
         <td>618</td>
@@ -243,6 +243,8 @@ def test_parse_major_admission_result_preserves_group_code_campus_and_quality_fl
     assert items[0]["major_code_raw"] == "080901"
     assert items[0]["campus"] == "主校区"
     assert items[0]["min_rank"] == 3456
+    assert items[0]["batch_category"] == "提前批"
+    assert items[0]["batch_segment"] == "A段"
     assert items[0]["data_source"] == "gaokao.chsi.com.cn"
     assert items[0]["quality_flags"] == []
     process_item.assert_awaited_once()

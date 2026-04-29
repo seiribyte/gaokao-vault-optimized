@@ -10,6 +10,7 @@ from gaokao_vault.constants import BASE_URL, TaskType
 from gaokao_vault.db.queries.enrollment import upsert_enrollment_plan
 from gaokao_vault.db.queries.majors import find_majors_by_name
 from gaokao_vault.models.enrollment import EnrollmentPlanItem
+from gaokao_vault.pipeline.batch_normalizer import normalize_batch
 from gaokao_vault.pipeline.quality import missing_field_flags
 from gaokao_vault.pipeline.validator import validate_item
 from gaokao_vault.spiders.base import BaseGaokaoSpider
@@ -105,6 +106,7 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
                 major_id = await _resolve_major_id(conn, major_name)
                 subject_category_id = await self._resolve_subject_category(subject_category_raw or "")
                 plan_count = int(plan_text) if plan_text and plan_text.isdigit() else None
+                batch_info = normalize_batch(batch)
                 physical_exam_limit = _extract_note_rule(note, ("体检", "色盲", "色弱", "限报", "不招"))
                 single_subject_limit = _extract_note_rule(note, ("单科", "英语", "数学", "语文"))
                 adjustment_rule = _extract_note_rule(note, ("调剂",))
@@ -115,6 +117,8 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
                     "year": year,
                     "subject_category_id": subject_category_id,
                     "batch": batch,
+                    "batch_category": batch_info.category,
+                    "batch_segment": batch_info.segment,
                     "major_name": major_name,
                     "major_id": major_id,
                     "plan_count": plan_count,

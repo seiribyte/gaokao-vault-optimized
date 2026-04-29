@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime
 
 from scrapling.spiders import Request, Response
@@ -8,6 +9,7 @@ from scrapling.spiders import Request, Response
 from gaokao_vault.constants import BASE_URL, TaskType
 from gaokao_vault.db.queries.special import upsert_special_enrollment
 from gaokao_vault.models.special import SpecialEnrollmentItem
+from gaokao_vault.pipeline.quality import missing_field_flags
 from gaokao_vault.pipeline.validator import validate_item
 from gaokao_vault.spiders.base import BaseGaokaoSpider
 
@@ -115,8 +117,18 @@ class SpecialSpider(BaseGaokaoSpider):
             return
         data = response.request.meta.get("item_data", {})
         content_el = response.css("div.article-content")
+        content_text = ""
         if content_el:
             data["content"] = content_el.get("").strip()[:10000]
+            content_text = "\n".join(part.strip() for part in content_el.css("::text").getall() if part.strip())
+
+        if data.get("enrollment_type") == "强基计划":
+            data.update(_extract_strong_base_fields(content_text))
+
+        data["quality_flags"] = missing_field_flags(
+            data,
+            ("application_url", "registration_start", "registration_end", "eligible_majors"),
+        )
 
         item = validate_item(SpecialEnrollmentItem, data)
         if item:
@@ -143,3 +155,49 @@ def _parse_date(text: str) -> date | None:
         except ValueError:
             continue
     return None
+
+
+def _extract_strong_base_fields(text: str) -> dict:
+    registration_start, registration_end = _extract_registration_dates(text)
+    return {
+        "application_url": _extract_application_url(text),
+        "registration_start": registration_start,
+        "registration_end": registration_end,
+        "selection_rule": _extract_labeled_sentence(text, "入围规则"),
+        "admission_rule": _extract_labeled_sentence(text, "录取规则"),
+        "eligible_majors": _extract_eligible_majors(text),
+    }
+
+
+def _extract_application_url(text: str) -> str | None:
+    match = re.search(r"https://bm\.chsi\.com\.cn/[^\s<]+", text)
+    if match is None:
+        return None
+    return match.group(0).rstrip(".")
+
+
+def _extract_registration_dates(text: str) -> tuple[date | None, date | None]:
+    match = re.search(
+        r"报名时间\s*[:\uFF1A]\s*(\d{4})年(\d{1,2})月(\d{1,2})日?\s*至\s*(\d{4})年(\d{1,2})月(\d{1,2})日?",
+        text,
+    )
+    if match is None:
+        return None, None
+    start = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    end = date(int(match.group(4)), int(match.group(5)), int(match.group(6)))
+    return start, end
+
+
+def _extract_labeled_sentence(text: str, label: str) -> str | None:
+    match = re.search(rf"{label}\s*[:\uFF1A]\s*([^\n\u3002.]+)", text)
+    if match is None:
+        return None
+    value = match.group(1).strip()
+    return value or None
+
+
+def _extract_eligible_majors(text: str) -> list[str]:
+    match = re.search(r"招生专业\s*[:\uFF1A]\s*([^\n\u3002.]+)", text)
+    if match is None:
+        return []
+    return [part.strip() for part in re.split(r"[\u3001,\uFF0C;\uFF1B]", match.group(1)) if part.strip()]

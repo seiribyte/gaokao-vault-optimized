@@ -115,7 +115,7 @@ _ENRICHED_PLAN_HTML = """
         <td>080901</td>
         <td>计算机科学与技术</td>
         <td>物理类</td>
-        <td>本科批</td>
+        <td>本科提前批A段</td>
         <td>5</td>
         <td>物理+化学</td>
         <td>主校区</td>
@@ -186,6 +186,8 @@ def test_parse_enrollment_plan_preserves_rule_fields_and_quality_flags() -> None
     assert items[0]["physical_exam_limit"] == "不招色盲"
     assert items[0]["single_subject_limit"] == "英语单科不低于110分"
     assert items[0]["adjustment_rule"] == "服从专业调剂"
+    assert items[0]["batch_category"] == "提前批"
+    assert items[0]["batch_segment"] == "A段"
     assert items[0]["data_source"] == "gaokao.chsi.com.cn"
     assert items[0]["quality_flags"] == []
     process_item.assert_awaited_once()
