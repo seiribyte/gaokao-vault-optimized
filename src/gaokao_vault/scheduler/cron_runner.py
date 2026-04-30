@@ -108,16 +108,18 @@ class IncrementalCronScheduler:
             msg = f"Invalid schedule mode '{self._mode}'. Must be 'full' or 'incremental'."
             raise ValueError(msg)
         self._types = types if types is not None else app_config.schedule.types
+        self._max_concurrent_types = app_config.schedule.max_concurrent_types
         self._running_task: asyncio.Task[None] | None = None
         self._last_checked_minute: datetime | None = None
 
     async def run_forever(self) -> None:
         logger.info(
-            "Scheduler started cron=%s timezone=%s mode=%s types=%s",
+            "Scheduler started cron=%s timezone=%s mode=%s types=%s max_concurrent_types=%d",
             self._cron.raw,
             _SHANGHAI_TZ.key,
             self._mode,
             self._types or "all",
+            self._max_concurrent_types,
         )
         while True:
             now = self._current_minute()
@@ -156,7 +158,7 @@ class IncrementalCronScheduler:
                 db_config=self._app_config.db,
                 app_config=self._app_config,
             )
-            await orchestrator.run_independent(scheduled_types)
+            await orchestrator.run_independent(scheduled_types, max_concurrent=self._max_concurrent_types)
         except Exception:
             logger.exception(
                 "Scheduled crawl failed scheduled_at=%s mode=%s types=%s",

@@ -16,6 +16,7 @@ class TestConfig:
         config = CrawlConfig()
         assert config.concurrency == 2
         assert config.base_delay > 0
+        assert config.spider_timeout == 14400
         assert config.browser_timeout_ms == 120000
         assert 0 < config.jitter_ratio < 1
 
@@ -25,8 +26,9 @@ class TestConfig:
 
     def test_schedule_config_defaults(self):
         config = ScheduleConfig()
-        assert config.cron == "0 0 * * *"
+        assert config.cron == "0 23 * * *"
         assert config.mode == "incremental"
+        assert config.max_concurrent_types == 3
         assert config.types == []
 
 

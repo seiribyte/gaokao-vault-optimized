@@ -409,6 +409,33 @@ class TestPhaseOrderingPreservation:
         assert run_single.await_count == 2
         assert [call.args[0] for call in run_single.await_args_list] == ["enrollment_plans", "special"]
 
+    def test_run_independent_limits_concurrent_types(self):
+        from gaokao_vault.scheduler.orchestrator import Orchestrator
+
+        mock_pool = MagicMock()
+        orch = Orchestrator(db_pool=mock_pool, mode="incremental")
+        running = 0
+        max_seen = 0
+
+        async def _run_single(_task_type: str):
+            nonlocal max_seen, running
+            running += 1
+            max_seen = max(max_seen, running)
+            await asyncio.sleep(0)
+            running -= 1
+            return {"failed": 0}
+
+        with patch.object(orch, "run_single", new=AsyncMock(side_effect=_run_single)):
+            results = asyncio.run(
+                orch.run_independent(
+                    ["schools", "majors", "enrollment_plans", "special"],
+                    max_concurrent=2,
+                )
+            )
+
+        assert len(results or []) == 4
+        assert max_seen == 2
+
 
 # ---------------------------------------------------------------------------
 # Property 2d: Spider Exception Handling

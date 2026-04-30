@@ -34,7 +34,7 @@ class CrawlConfig(BaseSettings):
     rs_wait_ms: int = 10000  # Wait time (ms) for RS anti-bot JS challenge
     browser_timeout_ms: int = 120000  # Navigation timeout (ms) for stealth browser requests
     log_dir: str = "./crawl_data/logs"
-    spider_timeout: int = 3600  # Per-spider timeout in seconds (1 hour)
+    spider_timeout: int = 14400  # Per-spider timeout in seconds (4 hours)
     phase_timeout: int = 14400  # Per-phase timeout in seconds (4 hours)
     heartbeat_interval: int = 120  # Heartbeat log interval in seconds
 
@@ -42,8 +42,9 @@ class CrawlConfig(BaseSettings):
 class ScheduleConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GAOKAO_SCHEDULE__")
 
-    cron: str = "0 0 * * *"
+    cron: str = "0 23 * * *"
     mode: str = "incremental"
+    max_concurrent_types: int = 3
     types: list[str] = Field(default_factory=list)
 
 

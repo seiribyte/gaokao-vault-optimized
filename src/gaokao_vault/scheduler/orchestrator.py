@@ -100,14 +100,22 @@ class Orchestrator:
         logger.info("Running selected types: %s", types)
         await self._run_phase(types)
 
-    async def run_independent(self, types: list[str]) -> list | None:
-        logger.info("Running independent types: %s", types)
+    async def run_independent(self, types: list[str], *, max_concurrent: int | None = None) -> list | None:
+        logger.info("Running independent types: %s max_concurrent=%s", types, max_concurrent or "unlimited")
         valid_types = [t for t in types if t in SPIDER_MAP]
         if not valid_types:
             return None
 
+        semaphore = asyncio.Semaphore(max_concurrent) if max_concurrent is not None and max_concurrent > 0 else None
+
+        async def _run_limited(task_type: str):
+            if semaphore is None:
+                return await self.run_single(task_type)
+            async with semaphore:
+                return await self.run_single(task_type)
+
         results = await asyncio.gather(
-            *(self.run_single(t) for t in valid_types),
+            *(_run_limited(t) for t in valid_types),
             return_exceptions=True,
         )
         for task_type, result in zip(valid_types, results, strict=True):

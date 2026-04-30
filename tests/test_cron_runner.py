@@ -74,7 +74,7 @@ def test_scheduler_runs_configured_types_incrementally() -> None:
     create_pool.assert_awaited_once_with(config.db)
     orchestrator_cls.assert_called_once()
     assert orchestrator_cls.call_args.kwargs["mode"] == "incremental"
-    orchestrator.run_independent.assert_awaited_once_with(["enrollment_plans", "special"])
+    orchestrator.run_independent.assert_awaited_once_with(["enrollment_plans", "special"], max_concurrent=3)
     orchestrator.run_types.assert_not_called()
     orchestrator.run_all.assert_not_called()
     close_pool.assert_awaited_once()
@@ -97,6 +97,6 @@ def test_scheduler_runs_all_types_independently_by_default() -> None:
         asyncio.run(scheduler._run_incremental_crawl(datetime(2026, 4, 23, 14, 0)))
 
     expected_types = [task_type.value for task_type in [*PHASE2_TYPES, *PHASE3_TYPES]]
-    orchestrator.run_independent.assert_awaited_once_with(expected_types)
+    orchestrator.run_independent.assert_awaited_once_with(expected_types, max_concurrent=3)
     orchestrator.run_types.assert_not_called()
     orchestrator.run_all.assert_not_called()
