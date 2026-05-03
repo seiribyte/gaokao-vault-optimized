@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from scrapling.parser import Adaptor
 
 from gaokao_vault.config import DatabaseConfig
-from gaokao_vault.spiders.score_segment_spider import ScoreSegmentSpider
+from gaokao_vault.spiders.score_segment_spider import ScoreSegmentSpider, _segment_tables
 
 
 class _Acquire:
@@ -116,6 +116,27 @@ def test_parse_index_yields_eol_article_requests_for_matching_province_and_year(
     assert [request.meta["province_id"] for request in requests] == [7, 7]
     assert [request.meta["year"] for request in requests] == [2025, 2025]
     assert all(request.callback == spider.parse for request in requests)
+
+
+def test_segment_tables_prefers_trs_editor_tables_without_duplicate() -> None:
+    response = _make_response(
+        """
+        <html>
+          <body>
+            <div class="TRS_Editor">
+              <table id="segment"><tr><td>分数</td><td>人数</td><td>累计人数</td></tr></table>
+            </div>
+            <table id="layout"><tr><td>栏目</td></tr></table>
+          </body>
+        </html>
+        """,
+        "https://gaokao.eol.cn/test.shtml",
+    )
+
+    tables = list(_segment_tables(response))
+
+    assert len(tables) == 1
+    assert tables[0].attrib["id"] == "segment"
 
 
 class _FakeSink:

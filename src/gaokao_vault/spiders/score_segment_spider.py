@@ -175,7 +175,7 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
         subject_hint = meta.get("subject_hint") or _extract_subject_hint(title)
         subject_category_id = await self._resolve_subject_category(subject_hint or "")
 
-        for table in response.css("div.TRS_Editor table, table"):
+        for table in _segment_tables(response):
             if not _looks_like_segment_table(table):
                 continue
             for row in table.css("tr"):
@@ -228,6 +228,13 @@ def _latest_eol_index_year() -> int:
 
 def _node_text(node) -> str:
     return "".join(part.strip() for part in node.css("::text").getall() if part.strip())
+
+
+def _segment_tables(response: Response):
+    editor_tables = response.css("div.TRS_Editor table")
+    if editor_tables:
+        return editor_tables
+    return response.css("table")
 
 
 def _index_blocks(response: Response) -> list[tuple[str, list[tuple[str, str]]]]:
