@@ -503,12 +503,13 @@ CREATE TABLE IF NOT EXISTS special_enrollments (
     content_hash    VARCHAR(64),
     crawl_task_id   BIGINT REFERENCES crawl_tasks(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE NULLS NOT DISTINCT (enrollment_type, school_id, year, title)
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_special_type_year ON special_enrollments(enrollment_type, year);
 CREATE INDEX IF NOT EXISTS idx_special_school ON special_enrollments(school_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_special_enrollments_unique_key
+    ON special_enrollments(enrollment_type, school_id, year, title) NULLS NOT DISTINCT;
 
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS special_admission_type VARCHAR(50);
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS province_code VARCHAR(20);

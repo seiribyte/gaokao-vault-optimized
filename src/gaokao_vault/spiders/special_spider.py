@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date, datetime
+from urllib.parse import urljoin
 
+from scrapling.fetchers import FetcherSession
 from scrapling.spiders import Request, Response
 
 from gaokao_vault.constants import BASE_URL, TaskType
@@ -29,6 +31,19 @@ ENROLLMENT_TYPES = [
 ]
 
 MAX_PAGES = 20
+DXSBB_BASE_URL = "https://www.dxsbb.com"
+DXSBB_SPECIAL_LISTS = [
+    {
+        "url": f"{DXSBB_BASE_URL}/news/list_130.html",
+        "enrollment_type": "强基计划",
+        "special_admission_type": "strong_foundation",
+    },
+    {
+        "url": f"{DXSBB_BASE_URL}/news/list_976.html",
+        "enrollment_type": "专项计划",
+        "special_admission_type": "special_plan",
+    },
+]
 
 
 class SpecialSpider(BaseGaokaoSpider):
@@ -36,14 +51,20 @@ class SpecialSpider(BaseGaokaoSpider):
 
     name: str = "special_spider"
     task_type: str = TaskType.SPECIAL
+    allowed_domains = {"www.dxsbb.com", "dxsbb.com"}  # noqa: RUF012
+
+    def configure_sessions(self, manager) -> None:
+        manager.add("http", FetcherSession())
 
     async def start_requests(self):
-        for etype in ENROLLMENT_TYPES:
-            url = f"{BASE_URL}/gkxx/tsbm/?type={etype}&page=1"
+        for source in DXSBB_SPECIAL_LISTS:
             yield Request(
-                url,
-                callback=self.parse,
-                meta={"enrollment_type": etype, "page": 1},
+                source["url"],
+                callback=self.parse_dxsbb_list,
+                meta={
+                    "enrollment_type": source["enrollment_type"],
+                    "special_admission_type": source["special_admission_type"],
+                },
             )
 
     async def parse(self, response: Response):
@@ -113,6 +134,88 @@ class SpecialSpider(BaseGaokaoSpider):
                 meta={"enrollment_type": etype, "page": next_page},
             )
 
+    async def parse_dxsbb_list(self, response: Response):
+        if response.request is None or response.status == 404:
+            return
+
+        enrollment_type = response.request.meta.get("enrollment_type")
+        special_admission_type = response.request.meta.get("special_admission_type")
+        seen_urls: set[str] = set()
+
+        for link in response.css(".listBox a[href^='/news/'], .listBox2news a[href^='/news/']"):
+            href = link.attrib.get("href", "").strip()
+            title = _link_title(link)
+            if not href or not title or not _special_title_matches(title, str(enrollment_type or "")):
+                continue
+
+            url = urljoin(DXSBB_BASE_URL, href)
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            yield Request(
+                url,
+                callback=self.parse_dxsbb_article,
+                meta={
+                    "enrollment_type": _infer_enrollment_type(title, str(enrollment_type or "")),
+                    "special_admission_type": _infer_special_admission_type(title, str(special_admission_type or "")),
+                    "title": title,
+                },
+            )
+
+        for link in response.css(".listNav a[href]"):
+            href = link.attrib.get("href", "").strip()
+            link_text = "".join(link.css("img::attr(alt), ::text").getall())
+            if href and "下一页" in link_text:
+                yield Request(
+                    urljoin(DXSBB_BASE_URL, href),
+                    callback=self.parse_dxsbb_list,
+                    meta={
+                        "enrollment_type": enrollment_type,
+                        "special_admission_type": special_admission_type,
+                    },
+                )
+
+    async def parse_dxsbb_article(self, response: Response):
+        if response.request is None or response.status == 404:
+            return
+
+        data = dict(response.request.meta)
+        title = str(data.get("title") or _first_text(response, "#article h1::text") or "").strip()
+        publish_date = _parse_dxsbb_publish_date(_first_text(response, "#article .update::text") or "")
+        content_el = response.css("#article .content")
+        content_text = ""
+        if content_el:
+            data["content"] = content_el.get("").strip()[:10000]
+            content_text = "\n".join(part.strip() for part in content_el.css("::text").getall() if part.strip())
+
+        data["title"] = title
+        data["year"] = _extract_year(title) or (publish_date.year if publish_date else datetime.now().year)
+        data["publish_date"] = publish_date
+        data["source_url"] = response.url
+
+        if data.get("enrollment_type") == "强基计划":
+            data.update(_extract_strong_base_fields(content_text))
+
+        data["quality_flags"] = missing_field_flags(
+            data,
+            ("application_url", "registration_window", "eligible_majors"),
+        )
+
+        item = validate_item(SpecialEnrollmentItem, data)
+        if item:
+            yield item
+            await self.process_item(
+                item,
+                entity_type="special_enrollments",
+                unique_keys={
+                    "enrollment_type": data.get("enrollment_type"),
+                    "school_id": data.get("school_id"),
+                    "year": data.get("year"),
+                    "title": data.get("title", ""),
+                },
+                upsert_fn=upsert_special_enrollment,
+            )
+
     async def parse_detail(self, response: Response):
         if response.request is None:
             return
@@ -165,6 +268,61 @@ def _parse_date(text: str) -> date | None:
         except ValueError:
             continue
     return None
+
+
+def _parse_dxsbb_publish_date(text: str) -> date | None:
+    match = re.search(r"(\d{4}-\d{1,2}-\d{1,2})", text)
+    if match is None:
+        return None
+    return _parse_date(match.group(1))
+
+
+def _extract_year(text: str) -> int | None:
+    match = re.search(r"(20\d{2})", text)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _link_title(link) -> str:
+    for selector in ("h3::text", "img::attr(alt)"):
+        value = link.css(selector).get()
+        if value and value.strip():
+            return value.strip()
+    return " ".join(part.strip() for part in link.css("::text").getall() if part.strip())
+
+
+def _first_text(response: Response, selector: str) -> str | None:
+    value = response.css(selector).get()
+    return value.strip() if value else None
+
+
+def _special_title_matches(title: str, enrollment_type: str) -> bool:
+    if enrollment_type == "强基计划":
+        return "强基" in title
+    if enrollment_type == "专项计划":
+        return "专项" in title
+    return enrollment_type in title
+
+
+def _infer_enrollment_type(title: str, default: str) -> str:
+    if "强基" in title:
+        return "强基计划"
+    if "高校专项" in title:
+        return "高校专项计划"
+    if "国家专项" in title:
+        return "国家专项计划"
+    if "地方专项" in title:
+        return "地方专项计划"
+    return default
+
+
+def _infer_special_admission_type(title: str, default: str) -> str | None:
+    if "强基" in title:
+        return "strong_foundation"
+    if "专项" in title:
+        return "special_plan"
+    return default or None
 
 
 def _extract_school_name_from_title(title: str) -> str | None:

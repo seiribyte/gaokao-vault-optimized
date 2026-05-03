@@ -4,6 +4,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from scrapling.parser import Adaptor
+from scrapling.spiders import Request
 
 from gaokao_vault.config import DatabaseConfig
 from gaokao_vault.spiders.special_spider import SpecialSpider, _extract_registration_dates
@@ -96,6 +97,71 @@ def test_parse_detail_extracts_strong_base_structured_fields() -> None:
     assert items[0]["composite_score_formula"] == "综合成绩=高考成绩*85%+校测成绩*15%"
     assert items[0]["admission_rule"] == "按综合成绩择优录取"
     assert items[0]["quality_flags"] == []
+
+
+def test_parse_dxsbb_list_yields_special_article_requests() -> None:
+    spider = _make_spider()
+    response = _make_response(
+        """
+        <div class="listBox">
+          <a href="/news/70169.html" target="_blank">
+            <div class="b"><h3>强基计划招生程序及管理要求</h3><p class="time">2026-4-7</p></div>
+          </a>
+          <a href="/news/1978.html" target="_blank">
+            <div class="b"><h3>平行志愿录取规则流程</h3><p class="time">2025-5-15</p></div>
+          </a>
+        </div>
+        """,
+        "https://www.dxsbb.com/news/list_130.html",
+        {"enrollment_type": "强基计划", "special_admission_type": "strong_foundation"},
+    )
+
+    results = asyncio.run(_collect(spider.parse_dxsbb_list(response)))
+
+    assert len(results) == 1
+    assert isinstance(results[0], Request)
+    assert results[0].url == "https://www.dxsbb.com/news/70169.html"
+    assert results[0].meta["title"] == "强基计划招生程序及管理要求"
+    assert results[0].meta["enrollment_type"] == "强基计划"
+    assert results[0].meta["special_admission_type"] == "strong_foundation"
+
+
+def test_parse_dxsbb_article_persists_special_enrollment_content() -> None:
+    spider = _make_spider()
+    response = _make_response(
+        """
+        <div id="article">
+          <h1>强基计划招生程序及管理要求</h1>
+          <div class="update">更新:2026-4-7 10:20:00&nbsp;&nbsp;发布:大学生必备网</div>
+          <div class="content">
+            <p>报名时间: 2026年4月10日至2026年4月30日.</p>
+            <p>招生专业: 数学类,物理学类.</p>
+            <p>录取规则: 按综合成绩择优录取.</p>
+          </div>
+        </div>
+        """,
+        "https://www.dxsbb.com/news/70169.html",
+        {
+            "enrollment_type": "强基计划",
+            "special_admission_type": "strong_foundation",
+            "title": "强基计划招生程序及管理要求",
+        },
+    )
+
+    with patch.object(spider, "process_item", new=AsyncMock(return_value="new")) as process_item:
+        items = asyncio.run(_collect(spider.parse_dxsbb_article(response)))
+
+    assert len(items) == 1
+    assert items[0]["enrollment_type"] == "强基计划"
+    assert items[0]["special_admission_type"] == "strong_foundation"
+    assert items[0]["year"] == 2026
+    assert items[0]["title"] == "强基计划招生程序及管理要求"
+    assert items[0]["source_url"] == "https://www.dxsbb.com/news/70169.html"
+    assert str(items[0]["publish_date"]) == "2026-04-07"
+    assert str(items[0]["registration_start"]) == "2026-04-10"
+    assert str(items[0]["registration_end"]) == "2026-04-30"
+    assert items[0]["eligible_majors"] == ["数学类", "物理学类"]
+    process_item.assert_awaited_once()
 
 
 def test_extract_registration_dates_returns_empty_values_for_invalid_dates() -> None:
