@@ -325,13 +325,14 @@ CREATE TABLE IF NOT EXISTS enrollment_plans (
     content_hash    VARCHAR(64),
     crawl_task_id   BIGINT REFERENCES crawl_tasks(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE NULLS NOT DISTINCT (school_id, province_id, year, subject_category_id, batch, major_name)
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_plans_school_province_year ON enrollment_plans(school_id, province_id, year);
 CREATE INDEX IF NOT EXISTS idx_plans_province_year ON enrollment_plans(province_id, year);
 CREATE INDEX IF NOT EXISTS idx_plans_major ON enrollment_plans(major_id) WHERE major_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_enrollment_plans_unique_key
+    ON enrollment_plans(school_id, province_id, year, subject_category_id, batch, major_name) NULLS NOT DISTINCT;
 
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS major_group_code VARCHAR(50);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS batch_code VARCHAR(30);
