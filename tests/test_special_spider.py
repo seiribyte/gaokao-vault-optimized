@@ -238,6 +238,58 @@ def test_parse_chsi_strong_base_school_yields_announcement_request() -> None:
     }
 
 
+def test_parse_chsi_strong_base_school_does_not_persist_empty_generated_charter() -> None:
+    spider = _make_spider()
+    response = _make_response(
+        "<html><head><title>国防科技大学2026年强基计划报名平台</title></head><body></body></html>",
+        "https://bm.chsi.com.cn/jcxkzs/sch/92002",
+        {
+            "school_code_raw": "92002",
+            "school_name_raw": "国防科技大学",
+            "application_url": "https://bm.chsi.com.cn/jcxkzs/sch/92002",
+        },
+    )
+
+    with patch.object(spider, "process_item", new=AsyncMock(return_value="new")) as process_item:
+        results = asyncio.run(_collect(spider.parse_chsi_strong_base_school(response)))
+
+    assert len(results) == 1
+    assert isinstance(results[0], Request)
+    process_item.assert_not_awaited()
+
+
+def test_parse_chsi_strong_base_school_preserves_unescaped_chinese_vue_content() -> None:
+    spider = _make_spider()
+    response = _make_response(
+        """
+        <html>
+          <head><title>国防科技大学2026年强基计划报名平台</title></head>
+          <body>
+            <script>
+              var mixin = {
+                data: function () {
+                  return {
+                    jzbt: "国防科技大学2026年强基计划招生简章",
+                    time:"2026-04-09 18:00 至 2026-05-01 00:00",
+                    content: "<p>招生专业: 数学与应用数学,物理学.</p><p>录取规则: 按综合成绩择优录取.</p>"
+                  }
+                }
+              }
+            </script>
+          </body>
+        </html>
+        """,
+        "https://bm.chsi.com.cn/jcxkzs/sch/92002",
+    )
+
+    with patch.object(spider, "process_item", new=AsyncMock(return_value="new")):
+        items = asyncio.run(_collect(spider.parse_chsi_strong_base_school(response)))
+
+    assert items[0]["title"] == "国防科技大学2026年强基计划招生简章"
+    assert items[0]["content_text"] == "招生专业: 数学与应用数学,物理学.\n录取规则: 按综合成绩择优录取."
+    assert items[0]["eligible_majors"] == ["数学与应用数学", "物理学"]
+
+
 def test_parse_chsi_strong_base_announcements_yields_detail_request() -> None:
     spider = _make_spider()
     response = _make_response(

@@ -82,3 +82,26 @@ def test_upsert_special_enrollment_preserves_strong_base_fields() -> None:
     )
     assert "https://bm.chsi.com.cn/jcxkzs/sch/10001" in conn.args
     assert json.dumps(["数学类", "物理学类"], ensure_ascii=False) in conn.args
+
+
+def test_upsert_special_enrollment_uses_source_identity_for_chsi_rows() -> None:
+    conn = _FakeConnection()
+
+    asyncio.run(
+        upsert_special_enrollment(
+            cast(Any, conn),
+            {
+                "enrollment_type": "强基计划",
+                "special_admission_type": "strong_foundation",
+                "school_code_raw": "92002",
+                "year": 2026,
+                "title": "2026年强基计划录取标准",
+                "source_section": "announcement",
+                "detail_url": "https://bm.chsi.com.cn/jcxkzs/sch/viewggtz/92002/101",
+            },
+        )
+    )
+
+    assert "ON CONFLICT (enrollment_type, school_id, school_code_raw, year, title, source_section, detail_url)" in (
+        conn.query
+    )

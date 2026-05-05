@@ -11,6 +11,7 @@ from gaokao_vault.pipeline.batch_normalizer import BatchInfo, normalize_batch
         ("本科提前批A段", BatchInfo(code="early", category="提前批", segment="A段")),
         ("提前批普通类A段", BatchInfo(code="early", category="提前批", segment="A段")),
         ("高职专科提前批", BatchInfo(code="early", category="提前批", segment=None)),
+        ("普通类", BatchInfo(code="regular", category="普通批", segment=None)),
         ("本科批", BatchInfo(code="regular", category="普通批", segment=None)),
         ("本科一批", BatchInfo(code="regular", category="普通批", segment=None)),
     ],

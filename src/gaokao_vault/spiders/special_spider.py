@@ -153,16 +153,15 @@ class SpecialSpider(BaseGaokaoSpider):
             response.request.meta.get("school_name_raw") or self._extract_school_name_from_page(response) or ""
         )
         application_url = str(response.request.meta.get("application_url") or response.url)
-        title = self._extract_vue_title(response) or (
-            f"{school_name_raw}2026年强基计划招生简章" if school_name_raw else "强基计划招生简章"
-        )
+        vue_title = self._extract_vue_title(response)
+        title = vue_title or (f"{school_name_raw}强基计划招生简章" if school_name_raw else "强基计划招生简章")
         content_html = self._extract_vue_content(response)
         publish_time = self._extract_vue_time(response)
         registration_start, registration_end = self._extract_time_window_from_text(publish_time or "")
         content_text = _normalized_html_text(content_html)
         eligible_majors = _extract_eligible_majors(content_text)
 
-        if content_html or content_text or _extract_year(title):
+        if vue_title or content_html or content_text:
             data = _build_chsi_strong_base_data(
                 title=title,
                 content_html=content_html,
@@ -546,6 +545,8 @@ def _extract_vue_string(response: Response, key: str) -> str | None:
 
 
 def _decode_js_string(value: str) -> str:
+    if "\\" not in value:
+        return value
     return value.encode("utf-8").decode("unicode_escape")
 
 

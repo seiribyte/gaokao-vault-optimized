@@ -15,8 +15,12 @@ def test_enrollment_plans_existing_tables_get_conflict_target_index() -> None:
 def test_special_enrollments_existing_tables_get_null_safe_conflict_target_index() -> None:
     schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
 
-    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_special_enrollments_unique_key" in schema_sql
-    assert "ON special_enrollments(enrollment_type, school_id, year, title)" in schema_sql
+    assert "DROP INDEX IF EXISTS idx_special_enrollments_unique_key" in schema_sql
+    assert "CREATE UNIQUE INDEX idx_special_enrollments_unique_key" in schema_sql
+    assert (
+        "ON special_enrollments(enrollment_type, school_id, school_code_raw, year, title, source_section, detail_url)"
+        in (schema_sql)
+    )
     assert "NULLS NOT DISTINCT" in schema_sql
 
 
@@ -74,12 +78,14 @@ def test_vector_documents_view_is_declared() -> None:
 
     assert "CREATE OR REPLACE VIEW gaokao_source.vector_documents_v AS" in schema_sql
     assert "CREATE OR REPLACE VIEW gaokao_source.vector_documents_source_v AS" in schema_sql
+    assert "DROP VIEW IF EXISTS gaokao_source.vector_documents_v" in schema_sql
     assert "FROM gaokao_source.special_enrollments_v" in schema_sql
     assert "document_uid" in schema_sql
     assert "authority_level" in schema_sql
     assert "metadata" in schema_sql
     assert "COALESCE(sd.title, sd.source_url)::TEXT AS text" not in schema_sql
     assert "COALESCE(NULLIF(sd.title, ''), '')::TEXT AS text" in schema_sql
+    assert "CONCAT_WS('\\n', NULLIF(se.title, ''), NULLIF(se.content_text, ''))::TEXT AS text" in schema_sql
     assert "regexp_replace(sd.source_url, '[?#].*$', '')::TEXT AS source_url" in schema_sql
     assert "'source_section', se.source_section" in schema_sql
     assert "'detail_url', se.detail_url" in schema_sql

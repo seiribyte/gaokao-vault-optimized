@@ -589,9 +589,6 @@ CREATE TABLE IF NOT EXISTS special_enrollments (
 
 CREATE INDEX IF NOT EXISTS idx_special_type_year ON special_enrollments(enrollment_type, year);
 CREATE INDEX IF NOT EXISTS idx_special_school ON special_enrollments(school_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_special_enrollments_unique_key
-    ON special_enrollments(enrollment_type, school_id, year, title) NULLS NOT DISTINCT;
-
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS special_admission_type VARCHAR(50);
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS province_code VARCHAR(20);
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS school_code_raw VARCHAR(50);
@@ -612,6 +609,11 @@ ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS composite_score_formula
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS admission_rule TEXT;
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS eligible_majors JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS quality_flags JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+DROP INDEX IF EXISTS idx_special_enrollments_unique_key;
+CREATE UNIQUE INDEX idx_special_enrollments_unique_key
+    ON special_enrollments(enrollment_type, school_id, school_code_raw, year, title, source_section, detail_url)
+    NULLS NOT DISTINCT;
 
 DROP TRIGGER IF EXISTS update_special_enrollments_updated_at ON special_enrollments;
 CREATE TRIGGER update_special_enrollments_updated_at BEFORE UPDATE ON special_enrollments
@@ -643,6 +645,8 @@ CREATE TRIGGER update_provincial_announcements_updated_at BEFORE UPDATE ON provi
 -- -----------------------------------------------------------
 
 CREATE SCHEMA IF NOT EXISTS gaokao_source;
+
+DROP VIEW IF EXISTS gaokao_source.vector_documents_v;
 
 CREATE OR REPLACE VIEW gaokao_source.vector_documents_source_v AS
 SELECT
@@ -680,7 +684,7 @@ SELECT
     END::TEXT AS entity_type,
     se.school_id AS entity_id,
     se.title,
-    COALESCE(NULLIF(se.title, ''), se.content_text, '')::TEXT AS text,
+    CONCAT_WS('\n', NULLIF(se.title, ''), NULLIF(se.content_text, ''))::TEXT AS text,
     jsonb_build_object(
         'enrollment_type', se.enrollment_type,
         'special_admission_type', se.special_admission_type,

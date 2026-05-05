@@ -14,7 +14,8 @@ async def upsert_special_enrollment(conn: asyncpg.Connection, data: dict) -> int
             milestones, shortlist_rule, selection_rule, school_assessment, school_exam_rule, composite_score_formula,
             admission_rule, eligible_majors, quality_flags, content_hash, crawl_task_id)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
-        ON CONFLICT (enrollment_type, school_id, year, title) DO UPDATE SET
+        ON CONFLICT (enrollment_type, school_id, school_code_raw, year, title, source_section, detail_url)
+        DO UPDATE SET
             special_admission_type=EXCLUDED.special_admission_type,
             province_code=EXCLUDED.province_code,
             school_code_raw=EXCLUDED.school_code_raw,

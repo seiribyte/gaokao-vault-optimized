@@ -88,3 +88,20 @@ def test_find_candidate_admission_chain_normalizes_early_batch_variants() -> Non
     assert "batch_code IS NOT DISTINCT FROM $5" in conn.query
     assert "batch_category IS NOT DISTINCT FROM $6" in conn.query
     assert "batch_segment IS NOT DISTINCT FROM $7" in conn.query
+
+
+def test_find_candidate_admission_chain_does_not_regularize_unknown_batches() -> None:
+    conn = _FakeConnection()
+    profile = CandidateProfile(
+        province_id=7,
+        year=2026,
+        subject_category_id=3,
+        score=612,
+        rank=4000,
+        batch="艺术类本科批",
+        rank_window=1500,
+    )
+
+    asyncio.run(find_candidate_admission_chain(cast(Any, conn), profile))
+
+    assert conn.args == (7, 2026, 3, "艺术类本科批", None, None, None, 2500, 5500, 4000, 3)
