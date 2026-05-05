@@ -36,3 +36,32 @@ def test_volunteer_timelines_batch_accepts_long_source_labels() -> None:
         re.S,
     )
     assert "ALTER TABLE volunteer_timelines ALTER COLUMN batch TYPE VARCHAR(255)" in schema_sql
+
+
+def test_source_lineage_tables_are_declared() -> None:
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+
+    assert "CREATE TABLE IF NOT EXISTS data_sources" in schema_sql
+    assert "CREATE TABLE IF NOT EXISTS source_documents" in schema_sql
+    assert "CREATE TABLE IF NOT EXISTS entity_evidence" in schema_sql
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_data_sources_code" in schema_sql
+    assert "DROP INDEX IF EXISTS idx_source_documents_source_url_hash" in schema_sql
+    assert "CREATE UNIQUE INDEX idx_source_documents_source_url_hash" in schema_sql
+    assert "ON source_documents(data_source_id, source_url, content_hash)" in schema_sql
+    assert "CREATE INDEX IF NOT EXISTS idx_source_documents_data_source" in schema_sql
+    assert "CREATE INDEX IF NOT EXISTS idx_entity_evidence_entity" in schema_sql
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_evidence_unique_key" in schema_sql
+    assert "CREATE INDEX IF NOT EXISTS idx_entity_evidence_source_document" in schema_sql
+    assert "CHECK (authority_level BETWEEN 0 AND 100)" in schema_sql
+
+
+def test_vector_documents_view_is_declared() -> None:
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+
+    assert "CREATE OR REPLACE VIEW gaokao_source.vector_documents_v AS" in schema_sql
+    assert "document_uid" in schema_sql
+    assert "authority_level" in schema_sql
+    assert "metadata" in schema_sql
+    assert "COALESCE(sd.title, sd.source_url)::TEXT AS text" not in schema_sql
+    assert "COALESCE(NULLIF(sd.title, ''), '')::TEXT AS text" in schema_sql
+    assert "regexp_replace(sd.source_url, '[?#].*$', '')::TEXT AS source_url" in schema_sql

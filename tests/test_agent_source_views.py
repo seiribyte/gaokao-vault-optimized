@@ -33,6 +33,7 @@ def test_admission_records_view_contains_major_level_evidence_columns() -> None:
         "eligibility_requirements",
         "physical_exam_or_political_review",
         "service_obligation",
+        "selection_requirement",
         "source_url",
     ):
         assert column_name in SCHEMA_SQL

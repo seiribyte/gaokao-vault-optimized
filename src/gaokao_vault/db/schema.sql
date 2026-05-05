@@ -53,6 +53,79 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_task ON crawl_snapshots(crawl_task_id);
 CREATE INDEX IF NOT EXISTS idx_snapshots_hash ON crawl_snapshots(entity_type, entity_id, content_hash);
 
 -- -----------------------------------------------------------
+-- 1.5 Source lineage
+-- -----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS data_sources (
+    id              BIGSERIAL PRIMARY KEY,
+    source_code     VARCHAR(100) NOT NULL,
+    source_name     VARCHAR(200) NOT NULL,
+    source_type     VARCHAR(50) NOT NULL,
+    authority_level SMALLINT NOT NULL CHECK (authority_level BETWEEN 0 AND 100),
+    province_code   VARCHAR(20),
+    base_url        VARCHAR(255) NOT NULL,
+    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_data_sources_code ON data_sources(source_code);
+
+DROP TRIGGER IF EXISTS update_data_sources_updated_at ON data_sources;
+CREATE TRIGGER update_data_sources_updated_at BEFORE UPDATE ON data_sources
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE IF NOT EXISTS source_documents (
+    id              BIGSERIAL PRIMARY KEY,
+    data_source_id  BIGINT NOT NULL REFERENCES data_sources(id),
+    source_url      VARCHAR(1000) NOT NULL,
+    title           VARCHAR(500),
+    publish_date    DATE,
+    fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    content_hash    VARCHAR(64) NOT NULL,
+    content_type    VARCHAR(100),
+    storage_key     VARCHAR(500),
+    parser_name     VARCHAR(100),
+    parser_version  VARCHAR(50),
+    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+DROP INDEX IF EXISTS idx_source_documents_source_url_hash;
+CREATE UNIQUE INDEX idx_source_documents_source_url_hash
+    ON source_documents(data_source_id, source_url, content_hash);
+
+CREATE INDEX IF NOT EXISTS idx_source_documents_data_source
+    ON source_documents(data_source_id);
+
+DROP TRIGGER IF EXISTS update_source_documents_updated_at ON source_documents;
+CREATE TRIGGER update_source_documents_updated_at BEFORE UPDATE ON source_documents
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE IF NOT EXISTS entity_evidence (
+    id                   BIGSERIAL PRIMARY KEY,
+    entity_type          VARCHAR(50) NOT NULL,
+    entity_id            BIGINT NOT NULL,
+    source_document_id   BIGINT NOT NULL REFERENCES source_documents(id),
+    field_name           VARCHAR(100),
+    extracted_value_hash VARCHAR(64),
+    confidence           NUMERIC(4,3) NOT NULL DEFAULT 1.0,
+    quality_flags        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_evidence_unique_key
+    ON entity_evidence(entity_type, entity_id, source_document_id, field_name, extracted_value_hash) NULLS NOT DISTINCT;
+
+CREATE INDEX IF NOT EXISTS idx_entity_evidence_entity
+    ON entity_evidence(entity_type, entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_entity_evidence_source_document
+    ON entity_evidence(source_document_id);
+
+-- -----------------------------------------------------------
 -- 2. Dimension tables
 -- -----------------------------------------------------------
 
@@ -561,6 +634,32 @@ CREATE TRIGGER update_provincial_announcements_updated_at BEFORE UPDATE ON provi
 
 CREATE SCHEMA IF NOT EXISTS gaokao_source;
 
+CREATE OR REPLACE VIEW gaokao_source.vector_documents_v AS
+SELECT
+    CONCAT('source_document:', sd.id)::TEXT AS document_uid,
+    'source_document'::TEXT AS document_type,
+    NULL::TEXT AS entity_type,
+    NULL::BIGINT AS entity_id,
+    sd.title,
+    COALESCE(NULLIF(sd.title, ''), '')::TEXT AS text,
+    jsonb_build_object(
+        'source_type', ds.source_type,
+        'province_code', ds.province_code,
+        'source_name', ds.source_name,
+        'content_type', sd.content_type,
+        'parser_name', sd.parser_name,
+        'parser_version', sd.parser_version,
+        'publish_date', sd.publish_date,
+        'fetched_at', sd.fetched_at
+    ) AS metadata,
+    regexp_replace(sd.source_url, '[?#].*$', '')::TEXT AS source_url,
+    ds.source_code,
+    ds.authority_level,
+    sd.content_hash,
+    sd.fetched_at
+FROM source_documents sd
+JOIN data_sources ds ON ds.id = sd.data_source_id;
+
 CREATE OR REPLACE VIEW gaokao_source.schools_v AS
 SELECT
     s.id AS school_id,
@@ -625,6 +724,7 @@ SELECT
     mar.physical_exam_or_political_review,
     mar.political_review_requirement,
     mar.service_obligation,
+    NULL::TEXT AS selection_requirement,
     mar.source_url,
     mar.data_source,
     'major_admission_results'::TEXT AS evidence_source
@@ -664,6 +764,7 @@ SELECT
     ep.physical_exam_or_political_review,
     ep.political_review_requirement,
     ep.service_obligation,
+    ep.selection_requirement,
     ep.source_url,
     ep.data_source,
     'enrollment_plans'::TEXT AS evidence_source
