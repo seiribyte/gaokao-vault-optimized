@@ -27,6 +27,20 @@ def test_special_enrollments_existing_tables_get_content_text_column() -> None:
     assert "ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS content_text TEXT" in schema_sql
 
 
+def test_special_enrollments_existing_tables_get_chsi_strong_base_lineage_columns() -> None:
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+
+    for column_sql in (
+        "school_code_raw VARCHAR(50)",
+        "school_name_raw VARCHAR(200)",
+        "source_section VARCHAR(50)",
+        "detail_url VARCHAR(255)",
+        "milestones JSONB NOT NULL DEFAULT '{}'::jsonb",
+    ):
+        assert column_sql in schema_sql
+        assert f"ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS {column_sql}" in schema_sql
+
+
 def test_volunteer_timelines_batch_accepts_long_source_labels() -> None:
     schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
 
@@ -59,9 +73,14 @@ def test_vector_documents_view_is_declared() -> None:
     schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
 
     assert "CREATE OR REPLACE VIEW gaokao_source.vector_documents_v AS" in schema_sql
+    assert "CREATE OR REPLACE VIEW gaokao_source.vector_documents_source_v AS" in schema_sql
+    assert "FROM gaokao_source.special_enrollments_v" in schema_sql
     assert "document_uid" in schema_sql
     assert "authority_level" in schema_sql
     assert "metadata" in schema_sql
     assert "COALESCE(sd.title, sd.source_url)::TEXT AS text" not in schema_sql
     assert "COALESCE(NULLIF(sd.title, ''), '')::TEXT AS text" in schema_sql
     assert "regexp_replace(sd.source_url, '[?#].*$', '')::TEXT AS source_url" in schema_sql
+    assert "'source_section', se.source_section" in schema_sql
+    assert "'detail_url', se.detail_url" in schema_sql
+    assert "'milestones', se.milestones" in schema_sql

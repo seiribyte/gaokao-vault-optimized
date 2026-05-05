@@ -558,16 +558,21 @@ CREATE TABLE IF NOT EXISTS special_enrollments (
     special_admission_type VARCHAR(50),
     province_code   VARCHAR(20),
     school_id       BIGINT REFERENCES schools(id),
+    school_code_raw VARCHAR(50),
+    school_name_raw VARCHAR(200),
     year            SMALLINT NOT NULL,
     title           VARCHAR(200),
     content         TEXT,
     content_text    TEXT,
     publish_date    DATE,
     source_url      VARCHAR(255),
+    source_section  VARCHAR(50),
+    detail_url      VARCHAR(255),
     application_url VARCHAR(255),
     registration_window JSONB NOT NULL DEFAULT '{}'::jsonb,
     registration_start DATE,
     registration_end DATE,
+    milestones      JSONB NOT NULL DEFAULT '{}'::jsonb,
     shortlist_rule  TEXT,
     selection_rule  TEXT,
     school_assessment TEXT,
@@ -589,11 +594,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_special_enrollments_unique_key
 
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS special_admission_type VARCHAR(50);
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS province_code VARCHAR(20);
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS school_code_raw VARCHAR(50);
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS school_name_raw VARCHAR(200);
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS content_text TEXT;
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS source_section VARCHAR(50);
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS detail_url VARCHAR(255);
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS application_url VARCHAR(255);
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS registration_window JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS registration_start DATE;
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS registration_end DATE;
+ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS milestones JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS shortlist_rule TEXT;
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS selection_rule TEXT;
 ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS school_assessment TEXT;
@@ -634,7 +644,7 @@ CREATE TRIGGER update_provincial_announcements_updated_at BEFORE UPDATE ON provi
 
 CREATE SCHEMA IF NOT EXISTS gaokao_source;
 
-CREATE OR REPLACE VIEW gaokao_source.vector_documents_v AS
+CREATE OR REPLACE VIEW gaokao_source.vector_documents_source_v AS
 SELECT
     CONCAT('source_document:', sd.id)::TEXT AS document_uid,
     'source_document'::TEXT AS document_type,
@@ -659,6 +669,82 @@ SELECT
     sd.fetched_at
 FROM source_documents sd
 JOIN data_sources ds ON ds.id = sd.data_source_id;
+
+CREATE OR REPLACE VIEW gaokao_source.special_enrollments_v AS
+SELECT
+    CONCAT('special_enrollment:', se.id)::TEXT AS document_uid,
+    'special_enrollment'::TEXT AS document_type,
+    CASE
+        WHEN se.school_id IS NOT NULL THEN 'school'
+        ELSE NULL
+    END::TEXT AS entity_type,
+    se.school_id AS entity_id,
+    se.title,
+    COALESCE(NULLIF(se.title, ''), se.content_text, '')::TEXT AS text,
+    jsonb_build_object(
+        'enrollment_type', se.enrollment_type,
+        'special_admission_type', se.special_admission_type,
+        'province_code', se.province_code,
+        'school_code_raw', se.school_code_raw,
+        'school_name_raw', se.school_name_raw,
+        'year', se.year,
+        'source_section', se.source_section,
+        'detail_url', se.detail_url,
+        'application_url', se.application_url,
+        'registration_window', se.registration_window,
+        'registration_start', se.registration_start,
+        'registration_end', se.registration_end,
+        'milestones', se.milestones,
+        'shortlist_rule', se.shortlist_rule,
+        'selection_rule', se.selection_rule,
+        'school_assessment', se.school_assessment,
+        'school_exam_rule', se.school_exam_rule,
+        'composite_score_formula', se.composite_score_formula,
+        'admission_rule', se.admission_rule,
+        'eligible_majors', se.eligible_majors,
+        'publish_date', se.publish_date,
+        'source_url', se.source_url
+    ) AS metadata,
+    regexp_replace(COALESCE(se.source_url, ''), '[?#].*$', '')::TEXT AS source_url,
+    CASE
+        WHEN se.enrollment_type = '强基计划' THEN 'special_enrollments.strong_foundation'
+        ELSE 'special_enrollments'
+    END AS source_code,
+    95::INTEGER AS authority_level,
+    se.content_hash,
+    COALESCE(se.updated_at, se.created_at) AS fetched_at
+FROM special_enrollments se;
+
+CREATE OR REPLACE VIEW gaokao_source.vector_documents_v AS
+SELECT
+    document_uid,
+    document_type,
+    entity_type,
+    entity_id,
+    title,
+    text,
+    metadata,
+    source_url,
+    source_code,
+    authority_level,
+    content_hash,
+    fetched_at
+FROM gaokao_source.vector_documents_source_v
+UNION ALL
+SELECT
+    document_uid,
+    document_type,
+    entity_type,
+    entity_id,
+    title,
+    text,
+    metadata,
+    source_url,
+    source_code,
+    authority_level,
+    content_hash,
+    fetched_at
+FROM gaokao_source.special_enrollments_v;
 
 CREATE OR REPLACE VIEW gaokao_source.schools_v AS
 SELECT

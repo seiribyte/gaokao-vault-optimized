@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncpg
 
 from gaokao_vault.models.recommendation import CandidateProfile
+from gaokao_vault.pipeline.batch_normalizer import normalize_batch
 
 
 async def find_candidate_admission_chain(
@@ -13,6 +14,7 @@ async def find_candidate_admission_chain(
 ) -> list[dict]:
     lower_rank = max(1, profile.rank - profile.rank_window)
     upper_rank = profile.rank + profile.rank_window
+    batch_info = normalize_batch(profile.batch)
     rows = await conn.fetch(
         """
         WITH matched_candidates AS (
@@ -23,10 +25,17 @@ async def find_candidate_admission_chain(
             FROM major_admission_results mar
             JOIN majors m ON m.id = mar.major_id
             WHERE mar.province_id = $1
-              AND mar.year BETWEEN ($2 - $8) AND ($2 - 1)
+              AND mar.year BETWEEN ($2 - $11) AND ($2 - 1)
               AND mar.subject_category_id IS NOT DISTINCT FROM $3
-              AND mar.batch = $4
-              AND mar.min_rank BETWEEN $5 AND $6
+              AND (
+                  mar.batch = $4
+                  OR (
+                      mar.batch_code IS NOT DISTINCT FROM $5
+                      AND mar.batch_category IS NOT DISTINCT FROM $6
+                      AND mar.batch_segment IS NOT DISTINCT FROM $7
+                  )
+              )
+              AND mar.min_rank BETWEEN $8 AND $9
         ),
         name_match_candidates AS (
             SELECT
@@ -48,7 +57,14 @@ async def find_candidate_admission_chain(
             WHERE ep.province_id = $1
               AND ep.year = $2
               AND ep.subject_category_id IS NOT DISTINCT FROM $3
-              AND ep.batch = $4
+              AND (
+                  ep.batch = $4
+                  OR (
+                      ep.batch_code IS NOT DISTINCT FROM $5
+                      AND ep.batch_category IS NOT DISTINCT FROM $6
+                      AND ep.batch_segment IS NOT DISTINCT FROM $7
+                  )
+              )
             UNION ALL
             SELECT
                 ep.*,
@@ -60,7 +76,14 @@ async def find_candidate_admission_chain(
             WHERE ep.province_id = $1
               AND ep.year = $2
               AND ep.subject_category_id IS NOT DISTINCT FROM $3
-              AND ep.batch = $4
+              AND (
+                  ep.batch = $4
+                  OR (
+                      ep.batch_code IS NOT DISTINCT FROM $5
+                      AND ep.batch_category IS NOT DISTINCT FROM $6
+                      AND ep.batch_segment IS NOT DISTINCT FROM $7
+                  )
+              )
               AND ep.major_id IS NULL
               AND NOT EXISTS (
                   SELECT 1
@@ -155,15 +178,22 @@ async def find_candidate_admission_chain(
                     )
                     ORDER BY mar.year DESC
                 ) AS admission_history,
-                MIN(ABS(mar.min_rank - $7)) AS rank_distance
+                MIN(ABS(mar.min_rank - $10)) AS rank_distance
             FROM major_admission_results mar
             JOIN matched_candidates mc
               ON mc.school_id = mar.school_id
              AND mc.major_id = mar.major_id
             WHERE mar.province_id = $1
-              AND mar.year BETWEEN ($2 - $8) AND ($2 - 1)
+              AND mar.year BETWEEN ($2 - $11) AND ($2 - 1)
               AND mar.subject_category_id IS NOT DISTINCT FROM $3
-              AND mar.batch = $4
+              AND (
+                  mar.batch = $4
+                  OR (
+                      mar.batch_code IS NOT DISTINCT FROM $5
+                      AND mar.batch_category IS NOT DISTINCT FROM $6
+                      AND mar.batch_segment IS NOT DISTINCT FROM $7
+                  )
+              )
             GROUP BY mar.school_id, mar.major_id
         )
         SELECT
@@ -212,6 +242,9 @@ async def find_candidate_admission_chain(
         profile.year,
         profile.subject_category_id,
         profile.batch,
+        batch_info.code,
+        batch_info.category,
+        batch_info.segment,
         lower_rank,
         upper_rank,
         profile.rank,

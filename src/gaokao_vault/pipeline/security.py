@@ -3,6 +3,8 @@ from __future__ import annotations
 import html
 import ipaddress
 import re
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import urlsplit
 
 _ALLOWED_SCHEMES = {"http", "https"}
@@ -38,7 +40,7 @@ _LOOPBACK_MAPPING_SUFFIXES = (
     ".sslip.io",
     ".localtest.me",
 )
-_REDACTION_TOKEN = "[REDACTED]"
+REDACTION_MARKER = "[REDACTED]"
 
 _SCRIPT_STYLE_RE = re.compile(r"(?is)<(script|style)\b[^>]*>.*?</\1\s*>")
 _COMMENT_RE = re.compile(r"(?s)<!--.*?-->")
@@ -100,7 +102,8 @@ def is_public_source_url(url: str) -> bool:
 
 def assert_allowed_source_url(url: str) -> str:
     if not is_public_source_url(url):
-        raise ValueError("Source URL is not public")
+        msg = "Source URL is not public"
+        raise ValueError(msg)
     return url
 
 
@@ -119,7 +122,7 @@ def sanitize_vector_text(raw: str | None) -> tuple[str, list[str]]:
 
     sensitive_redacted = False
     for pattern in _SENSITIVE_PATTERNS:
-        text, count = _substitute_with_count(pattern, _REDACTION_TOKEN, text)
+        text, count = _substitute_with_count(pattern, REDACTION_MARKER, text)
         sensitive_redacted = sensitive_redacted or count > 0
 
     if sensitive_redacted:
@@ -129,7 +132,7 @@ def sanitize_vector_text(raw: str | None) -> tuple[str, list[str]]:
     return cleaned, flags
 
 
-def sanitize_metadata(metadata: dict[str, object] | None) -> dict[str, object]:
+def sanitize_metadata(metadata: Mapping[str, Any] | None) -> dict[str, object]:
     if metadata is None:
         return {}
 
@@ -141,12 +144,12 @@ def sanitize_metadata(metadata: dict[str, object] | None) -> dict[str, object]:
     return sanitized
 
 
-def _sanitize_metadata_value(value: object) -> object:
+def _sanitize_metadata_value(value: Any) -> object:
     if isinstance(value, str):
         sanitized_text, _ = sanitize_vector_text(value)
         return sanitized_text
 
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         nested: dict[str, object] = {}
         for key, nested_value in value.items():
             string_key = str(key)

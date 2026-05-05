@@ -186,10 +186,7 @@ def test_insert_entity_evidence_uses_natural_key_conflict_and_json_quality_flags
     )
 
     assert evidence_id == 101
-    assert (
-        "ON CONFLICT (entity_type, entity_id, source_document_id, field_name, extracted_value_hash)"
-        in conn.query
-    )
+    assert "ON CONFLICT (entity_type, entity_id, source_document_id, field_name, extracted_value_hash)" in conn.query
     assert "confidence = EXCLUDED.confidence" in conn.query
     assert "quality_flags = EXCLUDED.quality_flags" in conn.query
     assert conn.args[-1] == json.dumps(["ocr_review", "manual_spot_check"], ensure_ascii=False)

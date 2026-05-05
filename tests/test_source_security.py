@@ -20,7 +20,7 @@ def test_sanitize_vector_text_removes_html_and_contact_data() -> None:
 
     raw = (
         "<style>body{display:none}</style><!-- hidden -->"
-        "<div>请联系 test@example.com 或 13800138000，准考证 123456789012。</div>"
+        "<div>请联系 test@example.com 或 13800138000, 准考证 123456789012。</div>"
     )
     text, flags = sanitize_vector_text(raw)
 

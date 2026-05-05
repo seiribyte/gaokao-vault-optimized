@@ -66,4 +66,25 @@ def test_find_candidate_admission_chain_joins_profile_admissions_and_current_pla
     assert "eligibility_requirements" in conn.query
     assert "physical_exam_or_political_review" in conn.query
     assert "service_obligation" in conn.query
-    assert conn.args == (7, 2026, 3, "本科批", 2500, 5500, 4000, 3)
+    assert conn.args == (7, 2026, 3, "本科批", "regular", "普通批", None, 2500, 5500, 4000, 3)
+
+
+def test_find_candidate_admission_chain_normalizes_early_batch_variants() -> None:
+    conn = _FakeConnection()
+    conn.rows = []
+    profile = CandidateProfile(
+        province_id=7,
+        year=2026,
+        subject_category_id=3,
+        score=612,
+        rank=4000,
+        batch="本科提前批A段",
+        rank_window=1500,
+    )
+
+    asyncio.run(find_candidate_admission_chain(cast(Any, conn), profile))
+
+    assert conn.args == (7, 2026, 3, "本科提前批A段", "early", "提前批", "A段", 2500, 5500, 4000, 3)
+    assert "batch_code IS NOT DISTINCT FROM $5" in conn.query
+    assert "batch_category IS NOT DISTINCT FROM $6" in conn.query
+    assert "batch_segment IS NOT DISTINCT FROM $7" in conn.query
