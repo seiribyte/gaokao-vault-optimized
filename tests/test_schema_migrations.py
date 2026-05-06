@@ -171,4 +171,6 @@ def test_admission_records_view_is_dropped_before_recreate_to_allow_column_order
 
     assert drop_view_sql in schema_sql
     assert create_view_sql in schema_sql
+    assert schema_sql.count(drop_view_sql) == 1
+    assert schema_sql.count(create_view_sql) == 1
     assert schema_sql.find(drop_view_sql) < schema_sql.find(create_view_sql)
