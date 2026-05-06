@@ -140,7 +140,7 @@ def test_parse_detail_persists_vue_and_static_article_content() -> None:
         <html><body>
           <h1>计算机科学与技术专业解读</h1>
           <div class="content">
-            <p>专业名称：计算机科学与技术</p>
+            <p>专业名称:计算机科学与技术</p>
             <p>培养目标和就业方向。</p>
           </div>
         </body></html>
@@ -165,7 +165,7 @@ def test_parse_detail_persists_vue_and_static_article_content() -> None:
         {
             "major_id": 31,
             "title": "计算机科学与技术专业解读",
-            "content": "专业名称：计算机科学与技术 培养目标和就业方向。",
+            "content": "专业名称:计算机科学与技术 培养目标和就业方向。",
             "author": None,
             "publish_date": ANY,
             "source_url": "https://gaokao.chsi.com.cn/zyk/zybk/zyjd/viewPage/123",
