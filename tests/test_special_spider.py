@@ -7,7 +7,12 @@ from scrapling.parser import Adaptor
 from scrapling.spiders import Request
 
 from gaokao_vault.config import DatabaseConfig
-from gaokao_vault.spiders.special_spider import CHSI_STRONG_BASE_SCHOOLS, SpecialSpider, _extract_registration_dates
+from gaokao_vault.spiders.special_spider import (
+    CHSI_STRONG_BASE_SCHOOLS,
+    SpecialSpider,
+    _decode_js_string,
+    _extract_registration_dates,
+)
 
 
 def _make_spider() -> SpecialSpider:
@@ -53,6 +58,18 @@ _STRONG_BASE_HTML = """
   </body>
 </html>
 """
+
+
+def test_decode_js_string_handles_valid_javascript_escapes() -> None:
+    value = r"\u56FD\u9632\u79D1\u6280\u5927\u5B66\nA\"B\/C"
+
+    assert _decode_js_string(value) == '国防科技大学\nA"B/C'
+
+
+def test_decode_js_string_preserves_malformed_or_unknown_escapes() -> None:
+    value = r"C:\data\school\x\q\u12GZ"
+
+    assert _decode_js_string(value) == value
 
 
 def test_parse_detail_extracts_strong_base_structured_fields() -> None:

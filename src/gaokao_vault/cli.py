@@ -186,7 +186,7 @@ def audit_completeness(
     limit: Annotated[int, typer.Option("--limit", "-n", help="Maximum missing school-year rows to print")] = 50,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
-    """Audit 2023-2025 admission-result and enrollment-plan coverage."""
+    """Audit recent three-year admission-result and enrollment-plan coverage."""
     _setup_logging(verbose)
 
     from gaokao_vault.db.queries.data_quality import normalize_completeness_years

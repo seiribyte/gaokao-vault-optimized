@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from typing import Any, cast
 
 from gaokao_vault.db.queries.data_quality import (
     fetch_school_year_plan_gaps,
     fetch_year_data_coverage,
+    normalize_completeness_years,
 )
 
 
@@ -19,6 +21,14 @@ class _FakeConnection:
         self.query = query
         self.args = args
         return self.rows
+
+
+def test_normalize_completeness_years_defaults_to_recent_three_completed_years_before_december() -> None:
+    assert normalize_completeness_years(None, today=date(2026, 5, 6)) == [2023, 2024, 2025]
+
+
+def test_normalize_completeness_years_includes_current_year_from_december() -> None:
+    assert normalize_completeness_years(None, today=date(2026, 12, 1)) == [2024, 2025, 2026]
 
 
 def test_fetch_year_data_coverage_compares_admissions_and_plans_by_year() -> None:

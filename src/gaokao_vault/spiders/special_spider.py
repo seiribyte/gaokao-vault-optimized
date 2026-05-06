@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import string
 from collections.abc import Iterable
 from datetime import date, datetime
 from html import unescape
@@ -547,7 +548,45 @@ def _extract_vue_string(response: Response, key: str) -> str | None:
 def _decode_js_string(value: str) -> str:
     if "\\" not in value:
         return value
-    return value.encode("utf-8").decode("unicode_escape")
+    decoded: list[str] = []
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if char != "\\":
+            decoded.append(char)
+            index += 1
+            continue
+
+        next_index = index + 1
+        if next_index >= len(value):
+            return value
+
+        escaped = value[next_index]
+        if escaped == "u":
+            hex_digits = value[index + 2 : index + 6]
+            if len(hex_digits) != 4 or not all(digit in string.hexdigits for digit in hex_digits):
+                return value
+            decoded.append(chr(int(hex_digits, 16)))
+            index += 6
+            continue
+
+        simple_escapes = {
+            '"': '"',
+            "'": "'",
+            "\\": "\\",
+            "/": "/",
+            "b": "\b",
+            "f": "\f",
+            "n": "\n",
+            "r": "\r",
+            "t": "\t",
+        }
+        replacement = simple_escapes.get(escaped)
+        if replacement is None:
+            return value
+        decoded.append(replacement)
+        index += 2
+    return "".join(decoded)
 
 
 def _clean_meta(meta: dict[str, str | None]) -> dict[str, str]:

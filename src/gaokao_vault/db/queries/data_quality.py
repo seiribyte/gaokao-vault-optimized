@@ -1,21 +1,30 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
 
 import asyncpg
 
-DEFAULT_COMPLETENESS_YEARS = (2023, 2024, 2025)
+COMPLETENESS_YEAR_WINDOW = 3
+CURRENT_YEAR_READY_MONTH = 12
 
 
-def normalize_completeness_years(years: Sequence[int] | None) -> list[int]:
+def normalize_completeness_years(years: Sequence[int] | None, *, today: date | None = None) -> list[int]:
     if not years:
-        return list(DEFAULT_COMPLETENESS_YEARS)
+        return default_completeness_years(today=today)
 
     normalized = sorted({int(year) for year in years})
     if not normalized:
         msg = "At least one year is required."
         raise ValueError(msg)
     return normalized
+
+
+def default_completeness_years(*, today: date | None = None) -> list[int]:
+    anchor = today or date.today()
+    latest_year = anchor.year if anchor.month >= CURRENT_YEAR_READY_MONTH else anchor.year - 1
+    first_year = latest_year - COMPLETENESS_YEAR_WINDOW + 1
+    return list(range(first_year, latest_year + 1))
 
 
 async def fetch_year_data_coverage(

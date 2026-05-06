@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
@@ -93,4 +94,30 @@ class TestAuditCompletenessCommandExecution:
         mock_create_pool.assert_awaited_once()
         mock_fetch_coverage.assert_awaited_once_with(conn, province="吉林", years=[2023, 2024, 2025])
         mock_fetch_gaps.assert_awaited_once_with(conn, province="吉林", years=[2023, 2024, 2025], limit=50)
+        mock_close_pool.assert_awaited_once()
+
+    @patch("gaokao_vault.db.connection.close_pool", new_callable=AsyncMock)
+    @patch("gaokao_vault.db.queries.data_quality.fetch_school_year_plan_gaps", new_callable=AsyncMock)
+    @patch("gaokao_vault.db.queries.data_quality.fetch_year_data_coverage", new_callable=AsyncMock)
+    @patch("gaokao_vault.db.queries.data_quality.date")
+    @patch("gaokao_vault.db.connection.create_pool", new_callable=AsyncMock)
+    def test_defaults_to_dynamic_recent_three_years(
+        self,
+        mock_create_pool,
+        mock_date,
+        mock_fetch_coverage,
+        mock_fetch_gaps,
+        mock_close_pool,
+    ) -> None:
+        mock_date.today.return_value = date(2026, 12, 1)
+        conn = MagicMock()
+        mock_create_pool.return_value = _FakePool(conn)
+        mock_fetch_coverage.return_value = []
+        mock_fetch_gaps.return_value = []
+
+        result = runner.invoke(app, ["audit-completeness", "--province", "吉林"])
+
+        assert result.exit_code == 0
+        mock_fetch_coverage.assert_awaited_once_with(conn, province="吉林", years=[2024, 2025, 2026])
+        mock_fetch_gaps.assert_awaited_once_with(conn, province="吉林", years=[2024, 2025, 2026], limit=50)
         mock_close_pool.assert_awaited_once()
