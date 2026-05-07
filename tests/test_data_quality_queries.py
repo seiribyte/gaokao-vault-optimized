@@ -6,7 +6,9 @@ from typing import Any, cast
 
 from gaokao_vault.db.queries.data_quality import (
     fetch_major_answer_readiness_gaps,
+    fetch_major_answer_readiness_match_diagnostics,
     fetch_major_answer_readiness_summary,
+    fetch_major_strength_signal_diagnostics,
     fetch_school_year_plan_gaps,
     fetch_year_data_coverage,
     normalize_completeness_years,
@@ -203,3 +205,77 @@ def test_fetch_major_answer_readiness_summary_counts_scope_and_gap_flags() -> No
     assert "UPDATE" not in conn.query.upper()
     assert "DELETE" not in conn.query.upper()
     assert conn.args == ("吉林", 2026, [2023, 2024, 2025], 3, "本科批")
+
+
+def test_fetch_major_answer_readiness_match_diagnostics_compares_exact_and_normalized_name_matches() -> None:
+    conn = _FakeConnection()
+    conn.rows = [
+        {
+            "plan_major_count": 5087,
+            "plan_major_with_major_id_count": 4900,
+            "exact_major_id_match_count": 155,
+            "normalized_name_match_count": 420,
+            "normalized_name_only_match_count": 265,
+            "unmatched_plan_major_count": 4667,
+        }
+    ]
+
+    diagnostics = asyncio.run(
+        fetch_major_answer_readiness_match_diagnostics(
+            cast(Any, conn),
+            province="吉林",
+            plan_year=2025,
+            admission_years=[2023, 2024, 2025],
+            subject_category_id=3,
+            batch="本科批",
+        )
+    )
+
+    assert diagnostics == conn.rows[0]
+    assert "target_plans" in conn.query
+    assert "admission_records" in conn.query
+    assert "exact_matches" in conn.query
+    assert "normalized_name_matches" in conn.query
+    assert "normalized_name_only_match_count" in conn.query
+    assert "REGEXP_REPLACE" in conn.query
+    assert "COALESCE(mar.major_name_raw, adm_major.name)" in conn.query
+    assert "mar.min_score IS NOT NULL" in conn.query
+    assert "mar.min_rank IS NOT NULL" in conn.query
+    assert "INSERT" not in conn.query.upper()
+    assert "UPDATE" not in conn.query.upper()
+    assert "DELETE" not in conn.query.upper()
+    assert conn.args == ("吉林", 2025, [2023, 2024, 2025], 3, "本科批")
+
+
+def test_fetch_major_strength_signal_diagnostics_counts_signal_and_rollup_coverage() -> None:
+    conn = _FakeConnection()
+    conn.rows = [
+        {
+            "plan_major_count": 5087,
+            "plan_major_with_school_major_count": 5000,
+            "plan_major_with_strength_signal_count": 120,
+            "plan_major_with_strength_rollup_count": 80,
+            "plan_major_signal_without_rollup_count": 40,
+        }
+    ]
+
+    diagnostics = asyncio.run(
+        fetch_major_strength_signal_diagnostics(
+            cast(Any, conn),
+            province="吉林",
+            plan_year=2025,
+            subject_category_id=3,
+            batch="本科批",
+        )
+    )
+
+    assert diagnostics == conn.rows[0]
+    assert "school_major_strength_signals" in conn.query
+    assert "school_majors" in conn.query
+    assert "plan_major_with_strength_signal_count" in conn.query
+    assert "plan_major_with_strength_rollup_count" in conn.query
+    assert "plan_major_signal_without_rollup_count" in conn.query
+    assert "INSERT" not in conn.query.upper()
+    assert "UPDATE" not in conn.query.upper()
+    assert "DELETE" not in conn.query.upper()
+    assert conn.args == ("吉林", 2025, 3, "本科批")

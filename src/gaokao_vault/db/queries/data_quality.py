@@ -165,6 +165,166 @@ _MAJOR_ANSWER_READINESS_SUMMARY_SQL = "".join((
         """,
 ))
 
+_MAJOR_ANSWER_READINESS_MATCH_DIAGNOSTICS_SQL = """
+        WITH target_province AS (
+            SELECT id, code, name
+            FROM provinces
+            WHERE code = $1 OR name = $1
+            ORDER BY CASE WHEN name = $1 THEN 0 ELSE 1 END
+            LIMIT 1
+        ),
+        target_plans AS (
+            SELECT
+                ep.school_id,
+                ep.major_id,
+                COALESCE(plan_major.name, ep.major_name) AS major_name,
+                LOWER(REGEXP_REPLACE(
+                    COALESCE(plan_major.name, ep.major_name, ''),
+                    CONCAT('[', CHR(65288), '(].*[', CHR(65289), ')]|\\s+|专业|类'),
+                    '',
+                    'g'
+                )) AS normalized_major_name
+            FROM enrollment_plans ep
+            JOIN target_province tp ON tp.id = ep.province_id
+            LEFT JOIN majors plan_major ON plan_major.id = ep.major_id
+            WHERE ep.year = $2
+              AND ($4::INTEGER IS NULL OR ep.subject_category_id IS NOT DISTINCT FROM $4)
+              AND ($5::TEXT IS NULL OR ep.batch = $5 OR ep.batch_category = $5)
+            GROUP BY ep.school_id, ep.major_id, COALESCE(plan_major.name, ep.major_name)
+        ),
+        admission_records AS (
+            SELECT
+                mar.school_id,
+                mar.major_id,
+                COALESCE(mar.major_name_raw, adm_major.name) AS major_name,
+                LOWER(REGEXP_REPLACE(
+                    COALESCE(mar.major_name_raw, adm_major.name, ''),
+                    CONCAT('[', CHR(65288), '(].*[', CHR(65289), ')]|\\s+|专业|类'),
+                    '',
+                    'g'
+                )) AS normalized_major_name,
+                BOOL_OR(mar.min_score IS NOT NULL) AS has_min_score,
+                BOOL_OR(mar.min_rank IS NOT NULL) AS has_min_rank
+            FROM major_admission_results mar
+            JOIN target_province tp ON tp.id = mar.province_id
+            LEFT JOIN majors adm_major ON adm_major.id = mar.major_id
+            WHERE mar.year = ANY($3::INTEGER[])
+              AND ($4::INTEGER IS NULL OR mar.subject_category_id IS NOT DISTINCT FROM $4)
+              AND ($5::TEXT IS NULL OR mar.batch = $5 OR mar.batch_category = $5)
+            GROUP BY
+                mar.school_id,
+                mar.major_id,
+                COALESCE(mar.major_name_raw, adm_major.name)
+        ),
+        exact_matches AS (
+            SELECT DISTINCT
+                tpl.school_id,
+                tpl.major_id,
+                tpl.major_name
+            FROM target_plans tpl
+            JOIN admission_records adm
+              ON adm.school_id = tpl.school_id
+             AND adm.major_id IS NOT DISTINCT FROM tpl.major_id
+        ),
+        normalized_name_matches AS (
+            SELECT DISTINCT
+                tpl.school_id,
+                tpl.major_id,
+                tpl.major_name
+            FROM target_plans tpl
+            JOIN admission_records adm
+              ON adm.school_id = tpl.school_id
+             AND adm.normalized_major_name = tpl.normalized_major_name
+            WHERE tpl.normalized_major_name <> ''
+        )
+        SELECT
+            COUNT(*)::INTEGER AS plan_major_count,
+            COUNT(*) FILTER (WHERE tpl.major_id IS NOT NULL)::INTEGER AS plan_major_with_major_id_count,
+            COUNT(exact_matches.*)::INTEGER AS exact_major_id_match_count,
+            COUNT(normalized_name_matches.*)::INTEGER AS normalized_name_match_count,
+            COUNT(normalized_name_matches.*) FILTER (WHERE exact_matches.school_id IS NULL)::INTEGER
+                AS normalized_name_only_match_count,
+            COUNT(*) FILTER (
+                WHERE exact_matches.school_id IS NULL
+                  AND normalized_name_matches.school_id IS NULL
+            )::INTEGER AS unmatched_plan_major_count
+        FROM target_plans tpl
+        LEFT JOIN exact_matches
+          ON exact_matches.school_id = tpl.school_id
+         AND exact_matches.major_id IS NOT DISTINCT FROM tpl.major_id
+         AND exact_matches.major_name IS NOT DISTINCT FROM tpl.major_name
+        LEFT JOIN normalized_name_matches
+          ON normalized_name_matches.school_id = tpl.school_id
+         AND normalized_name_matches.major_id IS NOT DISTINCT FROM tpl.major_id
+         AND normalized_name_matches.major_name IS NOT DISTINCT FROM tpl.major_name
+        """
+
+_MAJOR_STRENGTH_SIGNAL_DIAGNOSTICS_SQL = """
+        WITH target_province AS (
+            SELECT id, code, name
+            FROM provinces
+            WHERE code = $1 OR name = $1
+            ORDER BY CASE WHEN name = $1 THEN 0 ELSE 1 END
+            LIMIT 1
+        ),
+        target_plans AS (
+            SELECT
+                ep.school_id,
+                ep.major_id,
+                COALESCE(plan_major.name, ep.major_name) AS major_name
+            FROM enrollment_plans ep
+            JOIN target_province tp ON tp.id = ep.province_id
+            LEFT JOIN majors plan_major ON plan_major.id = ep.major_id
+            WHERE ep.year = $2
+              AND ($3::INTEGER IS NULL OR ep.subject_category_id IS NOT DISTINCT FROM $3)
+              AND ($4::TEXT IS NULL OR ep.batch = $4 OR ep.batch_category = $4)
+            GROUP BY ep.school_id, ep.major_id, COALESCE(plan_major.name, ep.major_name)
+        ),
+        signal_plan_majors AS (
+            SELECT DISTINCT
+                tpl.school_id,
+                tpl.major_id,
+                tpl.major_name
+            FROM target_plans tpl
+            JOIN school_major_strength_signals sms
+              ON sms.school_id = tpl.school_id
+             AND sms.major_id IS NOT DISTINCT FROM tpl.major_id
+        ),
+        rollup_plan_majors AS (
+            SELECT DISTINCT
+                tpl.school_id,
+                tpl.major_id,
+                tpl.major_name
+            FROM target_plans tpl
+            JOIN school_majors sm
+              ON sm.school_id = tpl.school_id
+             AND sm.major_id IS NOT DISTINCT FROM tpl.major_id
+            WHERE sm.major_strength_rank IS NOT NULL
+               OR sm.major_strength_score IS NOT NULL
+               OR sm.is_featured_major
+               OR sm.strength_evidence <> '[]'::jsonb
+        )
+        SELECT
+            COUNT(*)::INTEGER AS plan_major_count,
+            COUNT(sm.*)::INTEGER AS plan_major_with_school_major_count,
+            COUNT(signal_plan_majors.*)::INTEGER AS plan_major_with_strength_signal_count,
+            COUNT(rollup_plan_majors.*)::INTEGER AS plan_major_with_strength_rollup_count,
+            COUNT(signal_plan_majors.*) FILTER (WHERE rollup_plan_majors.school_id IS NULL)::INTEGER
+                AS plan_major_signal_without_rollup_count
+        FROM target_plans tpl
+        LEFT JOIN school_majors sm
+          ON sm.school_id = tpl.school_id
+         AND sm.major_id IS NOT DISTINCT FROM tpl.major_id
+        LEFT JOIN signal_plan_majors
+          ON signal_plan_majors.school_id = tpl.school_id
+         AND signal_plan_majors.major_id IS NOT DISTINCT FROM tpl.major_id
+         AND signal_plan_majors.major_name IS NOT DISTINCT FROM tpl.major_name
+        LEFT JOIN rollup_plan_majors
+          ON rollup_plan_majors.school_id = tpl.school_id
+         AND rollup_plan_majors.major_id IS NOT DISTINCT FROM tpl.major_id
+         AND rollup_plan_majors.major_name IS NOT DISTINCT FROM tpl.major_name
+        """
+
 
 def normalize_completeness_years(years: Sequence[int] | None, *, today: date | None = None) -> list[int]:
     if not years:
@@ -403,4 +563,61 @@ async def fetch_major_answer_readiness_summary(
         "missing_admission_min_score": 0,
         "missing_admission_min_rank": 0,
         "missing_strength_evidence": 0,
+    }
+
+
+async def fetch_major_answer_readiness_match_diagnostics(
+    conn: asyncpg.Connection,
+    *,
+    province: str,
+    plan_year: int,
+    admission_years: Sequence[int],
+    subject_category_id: int | None = None,
+    batch: str | None = None,
+) -> dict[str, object]:
+    rows = await conn.fetch(
+        _MAJOR_ANSWER_READINESS_MATCH_DIAGNOSTICS_SQL,
+        province,
+        plan_year,
+        list(admission_years),
+        subject_category_id,
+        batch,
+    )
+    if rows:
+        return dict(rows[0])
+
+    return {
+        "plan_major_count": 0,
+        "plan_major_with_major_id_count": 0,
+        "exact_major_id_match_count": 0,
+        "normalized_name_match_count": 0,
+        "normalized_name_only_match_count": 0,
+        "unmatched_plan_major_count": 0,
+    }
+
+
+async def fetch_major_strength_signal_diagnostics(
+    conn: asyncpg.Connection,
+    *,
+    province: str,
+    plan_year: int,
+    subject_category_id: int | None = None,
+    batch: str | None = None,
+) -> dict[str, object]:
+    rows = await conn.fetch(
+        _MAJOR_STRENGTH_SIGNAL_DIAGNOSTICS_SQL,
+        province,
+        plan_year,
+        subject_category_id,
+        batch,
+    )
+    if rows:
+        return dict(rows[0])
+
+    return {
+        "plan_major_count": 0,
+        "plan_major_with_school_major_count": 0,
+        "plan_major_with_strength_signal_count": 0,
+        "plan_major_with_strength_rollup_count": 0,
+        "plan_major_signal_without_rollup_count": 0,
     }

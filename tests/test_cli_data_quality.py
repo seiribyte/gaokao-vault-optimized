@@ -130,12 +130,18 @@ class TestAuditCompletenessCommandExecution:
 class TestAuditMajorReadinessCommandExecution:
     @patch("gaokao_vault.db.connection.close_pool", new_callable=AsyncMock)
     @patch("gaokao_vault.db.queries.data_quality.fetch_major_answer_readiness_gaps", new_callable=AsyncMock)
+    @patch("gaokao_vault.db.queries.data_quality.fetch_major_strength_signal_diagnostics", new_callable=AsyncMock)
+    @patch(
+        "gaokao_vault.db.queries.data_quality.fetch_major_answer_readiness_match_diagnostics", new_callable=AsyncMock
+    )
     @patch("gaokao_vault.db.queries.data_quality.fetch_major_answer_readiness_summary", new_callable=AsyncMock)
     @patch("gaokao_vault.db.connection.create_pool", new_callable=AsyncMock)
     def test_prints_major_readiness_gaps(
         self,
         mock_create_pool,
         mock_fetch_summary,
+        mock_fetch_match_diagnostics,
+        mock_fetch_strength_diagnostics,
         mock_fetch_readiness,
         mock_close_pool,
     ) -> None:
@@ -152,6 +158,21 @@ class TestAuditMajorReadinessCommandExecution:
             "missing_admission_min_score": 0,
             "missing_admission_min_rank": 1,
             "missing_strength_evidence": 1,
+        }
+        mock_fetch_match_diagnostics.return_value = {
+            "plan_major_count": 1,
+            "plan_major_with_major_id_count": 1,
+            "exact_major_id_match_count": 0,
+            "normalized_name_match_count": 1,
+            "normalized_name_only_match_count": 1,
+            "unmatched_plan_major_count": 0,
+        }
+        mock_fetch_strength_diagnostics.return_value = {
+            "plan_major_count": 1,
+            "plan_major_with_school_major_count": 1,
+            "plan_major_with_strength_signal_count": 1,
+            "plan_major_with_strength_rollup_count": 0,
+            "plan_major_signal_without_rollup_count": 1,
         }
         mock_fetch_readiness.return_value = [
             {
@@ -191,6 +212,13 @@ class TestAuditMajorReadinessCommandExecution:
         assert "Major answer readiness scope" in result.stdout
         assert "plan_major_count=1" in result.stdout
         assert "gap_count=1" in result.stdout
+        assert "Major admission match diagnostics" in result.stdout
+        assert "exact_major_id_match_count=0" in result.stdout
+        assert "normalized_name_match_count=1" in result.stdout
+        assert "normalized_name_only_match_count=1" in result.stdout
+        assert "Major strength signal diagnostics" in result.stdout
+        assert "plan_major_with_strength_signal_count=1" in result.stdout
+        assert "plan_major_signal_without_rollup_count=1" in result.stdout
         assert "Major answer readiness gaps" in result.stdout
         assert "长春理工大学" in result.stdout
         assert "missing_admission_min_rank,missing_strength_evidence" in result.stdout
@@ -202,6 +230,21 @@ class TestAuditMajorReadinessCommandExecution:
             province="吉林",
             plan_year=2026,
             admission_years=[2023, 2024, 2025],
+            subject_category_id=3,
+            batch="本科批",
+        )
+        mock_fetch_match_diagnostics.assert_awaited_once_with(
+            conn,
+            province="吉林",
+            plan_year=2026,
+            admission_years=[2023, 2024, 2025],
+            subject_category_id=3,
+            batch="本科批",
+        )
+        mock_fetch_strength_diagnostics.assert_awaited_once_with(
+            conn,
+            province="吉林",
+            plan_year=2026,
             subject_category_id=3,
             batch="本科批",
         )
@@ -218,12 +261,18 @@ class TestAuditMajorReadinessCommandExecution:
 
     @patch("gaokao_vault.db.connection.close_pool", new_callable=AsyncMock)
     @patch("gaokao_vault.db.queries.data_quality.fetch_major_answer_readiness_gaps", new_callable=AsyncMock)
+    @patch("gaokao_vault.db.queries.data_quality.fetch_major_strength_signal_diagnostics", new_callable=AsyncMock)
+    @patch(
+        "gaokao_vault.db.queries.data_quality.fetch_major_answer_readiness_match_diagnostics", new_callable=AsyncMock
+    )
     @patch("gaokao_vault.db.queries.data_quality.fetch_major_answer_readiness_summary", new_callable=AsyncMock)
     @patch("gaokao_vault.db.connection.create_pool", new_callable=AsyncMock)
     def test_prints_no_matching_plan_scope_when_readiness_rows_are_empty(
         self,
         mock_create_pool,
         mock_fetch_summary,
+        mock_fetch_match_diagnostics,
+        mock_fetch_strength_diagnostics,
         mock_fetch_readiness,
         mock_close_pool,
     ) -> None:
@@ -240,6 +289,21 @@ class TestAuditMajorReadinessCommandExecution:
             "missing_admission_min_score": 0,
             "missing_admission_min_rank": 0,
             "missing_strength_evidence": 0,
+        }
+        mock_fetch_match_diagnostics.return_value = {
+            "plan_major_count": 0,
+            "plan_major_with_major_id_count": 0,
+            "exact_major_id_match_count": 0,
+            "normalized_name_match_count": 0,
+            "normalized_name_only_match_count": 0,
+            "unmatched_plan_major_count": 0,
+        }
+        mock_fetch_strength_diagnostics.return_value = {
+            "plan_major_count": 0,
+            "plan_major_with_school_major_count": 0,
+            "plan_major_with_strength_signal_count": 0,
+            "plan_major_with_strength_rollup_count": 0,
+            "plan_major_signal_without_rollup_count": 0,
         }
         mock_fetch_readiness.return_value = []
 
@@ -267,7 +331,11 @@ class TestAuditMajorReadinessCommandExecution:
         assert result.exit_code == 0
         assert "plan_major_count=0" in result.stdout
         assert "No matching enrollment plans in requested scope." in result.stdout
+        assert "Major admission match diagnostics" in result.stdout
+        assert "Major strength signal diagnostics" in result.stdout
         assert "None in requested scope." in result.stdout
         mock_fetch_summary.assert_awaited_once()
+        mock_fetch_match_diagnostics.assert_awaited_once()
+        mock_fetch_strength_diagnostics.assert_awaited_once()
         mock_fetch_readiness.assert_awaited_once()
         mock_close_pool.assert_awaited_once()

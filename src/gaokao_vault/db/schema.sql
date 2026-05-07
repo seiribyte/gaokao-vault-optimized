@@ -494,6 +494,8 @@ CREATE TABLE IF NOT EXISTS major_admission_results (
     batch_segment   VARCHAR(30),
     min_score       INTEGER,
     min_rank        INTEGER,
+    min_rank_source VARCHAR(50),
+    min_rank_is_derived BOOLEAN NOT NULL DEFAULT FALSE,
     avg_score       INTEGER,
     avg_rank        INTEGER,
     max_score       INTEGER,
@@ -539,6 +541,8 @@ ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS major_group_code VA
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS major_code_raw VARCHAR(50);
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS campus VARCHAR(100);
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS plan_count INTEGER;
+ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS min_rank_source VARCHAR(50);
+ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS min_rank_is_derived BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS program_type VARCHAR(100);
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS eligibility_requirements TEXT;
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS physical_exam_or_political_review TEXT;
@@ -844,6 +848,8 @@ SELECT
     COALESCE(mar.batch_code, mar.batch) AS batch_code,
     mar.min_score,
     mar.min_rank,
+    mar.min_rank_source,
+    mar.min_rank_is_derived,
     mar.plan_count,
     CONCAT_WS(
         '；',
@@ -886,6 +892,8 @@ SELECT
     COALESCE(ep.batch_code, ep.batch) AS batch_code,
     NULL::INTEGER AS min_score,
     NULL::INTEGER AS min_rank,
+    NULL::TEXT AS min_rank_source,
+    FALSE AS min_rank_is_derived,
     ep.plan_count,
     CONCAT_WS(
         '；',

@@ -17,6 +17,8 @@ class MajorAdmissionResultItem(BaseModel):
     batch_segment: str | None = None
     min_score: int | None = None
     min_rank: int | None = None
+    min_rank_source: str | None = None
+    min_rank_is_derived: bool = False
     avg_score: int | None = None
     avg_rank: int | None = None
     max_score: int | None = None

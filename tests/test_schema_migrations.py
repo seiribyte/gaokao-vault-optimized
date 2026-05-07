@@ -84,6 +84,20 @@ def test_school_major_strength_signals_table_is_declared() -> None:
     assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_school_major_strength_signals_unique_key" in schema_sql
 
 
+def test_major_admission_results_tracks_min_rank_source() -> None:
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+
+    for column_sql in (
+        "min_rank_source VARCHAR(50)",
+        "min_rank_is_derived BOOLEAN NOT NULL DEFAULT FALSE",
+    ):
+        assert column_sql in schema_sql
+        assert f"ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS {column_sql}" in schema_sql
+
+    assert "mar.min_rank_source" in schema_sql
+    assert "mar.min_rank_is_derived" in schema_sql
+
+
 def test_special_enrollments_existing_tables_get_null_safe_conflict_target_index() -> None:
     schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
 

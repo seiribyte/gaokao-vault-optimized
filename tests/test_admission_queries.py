@@ -45,7 +45,10 @@ def test_upsert_major_admission_result_uses_natural_key() -> None:
                 "major_group_code": "01",
                 "major_code_raw": "080901",
                 "campus": "主校区",
+                "min_rank": 45678,
                 "data_source": "gaokao.chsi.com.cn",
+                "min_rank_source": "official",
+                "min_rank_is_derived": False,
                 "quality_flags": [],
             },
         )
@@ -59,10 +62,14 @@ def test_upsert_major_admission_result_uses_natural_key() -> None:
     assert "batch_category" in conn.query
     assert "program_type" in conn.query
     assert "plan_count" in conn.query
+    assert "min_rank_source" in conn.query
+    assert "min_rank_is_derived" in conn.query
     assert "physical_exam_or_political_review" in conn.query
     assert "political_review_requirement" in conn.query
     assert "10200" in conn.args
     assert "regular" in conn.args
     assert "普通批" in conn.args
     assert "080901" in conn.args
+    assert "official" in conn.args
+    assert False in conn.args
     assert json.dumps([], ensure_ascii=False) in conn.args

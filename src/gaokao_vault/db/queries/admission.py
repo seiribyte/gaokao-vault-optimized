@@ -11,7 +11,8 @@ async def upsert_major_admission_result(conn: asyncpg.Connection, data: dict) ->
         INSERT INTO major_admission_results (
             school_id, major_id, province_id, year, subject_category_id, batch,
             batch_code, batch_category, batch_segment,
-            min_score, min_rank, avg_score, avg_rank, max_score, max_rank,
+            min_score, min_rank, min_rank_source, min_rank_is_derived,
+            avg_score, avg_rank, max_score, max_rank,
             admitted_count, plan_count, school_code_raw, school_name_raw, major_group_code,
             major_code_raw, campus, program_type, eligibility_requirements,
             physical_exam_or_political_review, political_review_requirement, service_obligation,
@@ -19,13 +20,15 @@ async def upsert_major_admission_result(conn: asyncpg.Connection, data: dict) ->
             remark, source_url, data_source, source_updated_at, quality_flags,
             content_hash, crawl_task_id
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39)
         ON CONFLICT (school_id, major_id, province_id, year, subject_category_id, batch) DO UPDATE SET
             batch_code=EXCLUDED.batch_code,
             batch_category=EXCLUDED.batch_category,
             batch_segment=EXCLUDED.batch_segment,
             min_score=EXCLUDED.min_score,
             min_rank=EXCLUDED.min_rank,
+            min_rank_source=EXCLUDED.min_rank_source,
+            min_rank_is_derived=EXCLUDED.min_rank_is_derived,
             avg_score=EXCLUDED.avg_score,
             avg_rank=EXCLUDED.avg_rank,
             max_score=EXCLUDED.max_score,
@@ -65,6 +68,8 @@ async def upsert_major_admission_result(conn: asyncpg.Connection, data: dict) ->
         data.get("batch_segment"),
         data.get("min_score"),
         data.get("min_rank"),
+        data.get("min_rank_source"),
+        data.get("min_rank_is_derived", False),
         data.get("avg_score"),
         data.get("avg_rank"),
         data.get("max_score"),

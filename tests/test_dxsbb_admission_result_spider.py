@@ -158,6 +158,8 @@ def test_parse_article_persists_major_admission_results_from_score_table() -> No
             "batch_segment": None,
             "min_score": 484,
             "min_rank": None,
+            "min_rank_source": None,
+            "min_rank_is_derived": False,
             "avg_score": 498,
             "avg_rank": None,
             "max_score": 533,
