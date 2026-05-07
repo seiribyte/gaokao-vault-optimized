@@ -168,6 +168,8 @@ class DxsbbAdmissionResultSpider(BaseGaokaoSpider):
             "batch_segment": batch_info.segment,
             "min_score": _parse_score(_cell_text(cells, _column_index(header_map, ("最低分", "最低分数")))),
             "min_rank": None,
+            "min_rank_source": None,
+            "min_rank_is_derived": False,
             "avg_score": _parse_score(_cell_text(cells, _column_index(header_map, ("平均分",)))),
             "avg_rank": None,
             "max_score": _parse_score(_cell_text(cells, _column_index(header_map, ("最高分",)))),

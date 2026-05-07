@@ -84,6 +84,20 @@ def test_school_major_strength_signals_table_is_declared() -> None:
     assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_school_major_strength_signals_unique_key" in schema_sql
 
 
+def test_major_admission_results_tracks_min_rank_source() -> None:
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+
+    for column_sql in (
+        "min_rank_source VARCHAR(50)",
+        "min_rank_is_derived BOOLEAN NOT NULL DEFAULT FALSE",
+    ):
+        assert column_sql in schema_sql
+        assert f"ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS {column_sql}" in schema_sql
+
+    assert "mar.min_rank_source" in schema_sql
+    assert "mar.min_rank_is_derived" in schema_sql
+
+
 def test_special_enrollments_existing_tables_get_null_safe_conflict_target_index() -> None:
     schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
 
@@ -174,3 +188,15 @@ def test_admission_records_view_is_dropped_before_recreate_to_allow_column_order
     assert schema_sql.count(drop_view_sql) == 1
     assert schema_sql.count(create_view_sql) == 1
     assert schema_sql.find(drop_view_sql) < schema_sql.find(create_view_sql)
+
+
+def test_admission_records_view_appends_min_rank_provenance_to_preserve_existing_column_order() -> None:
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+
+    assert "mar.min_rank, mar.plan_count" in schema_sql
+    assert "NULL::INTEGER AS min_rank, ep.plan_count" in schema_sql
+    assert "mar.min_rank_source, mar.min_rank_is_derived" in schema_sql
+    assert "NULL::TEXT AS min_rank_source, FALSE AS min_rank_is_derived" in schema_sql
+    assert schema_sql.find("mar.min_rank, mar.plan_count") < schema_sql.find(
+        "mar.min_rank_source, mar.min_rank_is_derived"
+    )

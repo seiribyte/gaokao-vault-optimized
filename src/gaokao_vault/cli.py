@@ -274,7 +274,9 @@ def audit_major_readiness(
         from gaokao_vault.db.connection import close_pool, create_pool
         from gaokao_vault.db.queries.data_quality import (
             fetch_major_answer_readiness_gaps,
+            fetch_major_answer_readiness_match_diagnostics,
             fetch_major_answer_readiness_summary,
+            fetch_major_strength_signal_diagnostics,
         )
 
         pool = await create_pool()
@@ -285,6 +287,21 @@ def audit_major_readiness(
                     province=province,
                     plan_year=plan_year,
                     admission_years=admission_years,
+                    subject_category_id=subject_category_id,
+                    batch=batch,
+                )
+                match_diagnostics = await fetch_major_answer_readiness_match_diagnostics(
+                    conn,
+                    province=province,
+                    plan_year=plan_year,
+                    admission_years=admission_years,
+                    subject_category_id=subject_category_id,
+                    batch=batch,
+                )
+                strength_diagnostics = await fetch_major_strength_signal_diagnostics(
+                    conn,
+                    province=province,
+                    plan_year=plan_year,
                     subject_category_id=subject_category_id,
                     batch=batch,
                 )
@@ -308,6 +325,8 @@ def audit_major_readiness(
             subject_category_id=subject_category_id,
             batch=batch,
         )
+        _print_major_readiness_match_diagnostics(match_diagnostics)
+        _print_major_strength_signal_diagnostics(strength_diagnostics)
         _print_major_readiness_gaps(rows, summary)
 
     asyncio.run(_run())
@@ -342,10 +361,44 @@ def _print_major_readiness_summary(
         f"missing_selection_requirement={summary.get('missing_selection_requirement', 0)} "
         f"missing_admission_min_score={summary.get('missing_admission_min_score', 0)} "
         f"missing_admission_min_rank={summary.get('missing_admission_min_rank', 0)} "
+        f"missing_admission_linkage={summary.get('missing_admission_linkage', 0)} "
         f"missing_strength_evidence={summary.get('missing_strength_evidence', 0)}"
     )
     if summary.get("plan_major_count", 0) == 0:
         typer.echo("  No matching enrollment plans in requested scope. Check province/year/subject/batch.")
+
+
+def _print_major_readiness_match_diagnostics(diagnostics: dict[str, object]) -> None:
+    typer.echo("Major admission match diagnostics")
+    typer.echo(
+        "  "
+        f"plan_major_count={diagnostics.get('plan_major_count', 0)} "
+        f"plan_major_with_major_id_count={diagnostics.get('plan_major_with_major_id_count', 0)} "
+        f"exact_major_id_match_count={diagnostics.get('exact_major_id_match_count', 0)} "
+        f"exact_major_id_match_with_min_score_count={diagnostics.get('exact_major_id_match_with_min_score_count', 0)} "
+        f"exact_major_id_match_with_min_rank_count={diagnostics.get('exact_major_id_match_with_min_rank_count', 0)} "
+        f"normalized_name_match_count={diagnostics.get('normalized_name_match_count', 0)} "
+        f"normalized_name_match_with_min_score_count={diagnostics.get('normalized_name_match_with_min_score_count', 0)} "
+        f"normalized_name_match_with_min_rank_count={diagnostics.get('normalized_name_match_with_min_rank_count', 0)} "
+        f"normalized_name_only_match_count={diagnostics.get('normalized_name_only_match_count', 0)} "
+        "normalized_name_only_match_with_min_score_count="
+        f"{diagnostics.get('normalized_name_only_match_with_min_score_count', 0)} "
+        "normalized_name_only_match_with_min_rank_count="
+        f"{diagnostics.get('normalized_name_only_match_with_min_rank_count', 0)} "
+        f"unmatched_plan_major_count={diagnostics.get('unmatched_plan_major_count', 0)}"
+    )
+
+
+def _print_major_strength_signal_diagnostics(diagnostics: dict[str, object]) -> None:
+    typer.echo("Major strength signal diagnostics")
+    typer.echo(
+        "  "
+        f"plan_major_count={diagnostics.get('plan_major_count', 0)} "
+        f"plan_major_with_school_major_count={diagnostics.get('plan_major_with_school_major_count', 0)} "
+        f"plan_major_with_strength_signal_count={diagnostics.get('plan_major_with_strength_signal_count', 0)} "
+        f"plan_major_with_strength_rollup_count={diagnostics.get('plan_major_with_strength_rollup_count', 0)} "
+        f"plan_major_signal_without_rollup_count={diagnostics.get('plan_major_signal_without_rollup_count', 0)}"
+    )
 
 
 def _print_major_readiness_gaps(rows: list[dict], summary: dict[str, object]) -> None:
@@ -364,6 +417,7 @@ def _print_major_readiness_gaps(rows: list[dict], summary: dict[str, object]) ->
             f"{row.get('school_name')} {row.get('major_name')}: "
             f"flags={flags} "
             f"plan_count={row.get('plan_count')} "
+            f"admission_match_type={row.get('admission_match_type')} "
             f"latest_min_score_year={row.get('latest_min_score_year')} "
             f"latest_min_score={row.get('latest_min_score')} "
             f"latest_min_rank_year={row.get('latest_min_rank_year')} "

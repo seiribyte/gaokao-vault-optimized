@@ -273,6 +273,8 @@ class MajorAdmissionResultSpider(BaseGaokaoSpider):
                         "batch_segment": batch_info.segment,
                         "min_score": min_score,
                         "min_rank": min_rank,
+                        "min_rank_source": "official" if min_rank is not None else None,
+                        "min_rank_is_derived": False,
                         "avg_score": avg_score,
                         "admitted_count": admitted_count,
                         "plan_count": plan_count,

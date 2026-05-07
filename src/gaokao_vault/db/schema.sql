@@ -494,6 +494,8 @@ CREATE TABLE IF NOT EXISTS major_admission_results (
     batch_segment   VARCHAR(30),
     min_score       INTEGER,
     min_rank        INTEGER,
+    min_rank_source VARCHAR(50),
+    min_rank_is_derived BOOLEAN NOT NULL DEFAULT FALSE,
     avg_score       INTEGER,
     avg_rank        INTEGER,
     max_score       INTEGER,
@@ -539,6 +541,8 @@ ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS major_group_code VA
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS major_code_raw VARCHAR(50);
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS campus VARCHAR(100);
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS plan_count INTEGER;
+ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS min_rank_source VARCHAR(50);
+ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS min_rank_is_derived BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS program_type VARCHAR(100);
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS eligibility_requirements TEXT;
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS physical_exam_or_political_review TEXT;
@@ -873,7 +877,9 @@ SELECT
     NULL::TEXT AS selection_requirement,
     mar.source_url,
     mar.data_source,
-    'major_admission_results'::TEXT AS evidence_source
+    'major_admission_results'::TEXT AS evidence_source,
+    mar.min_rank_source,
+    mar.min_rank_is_derived
 FROM major_admission_results mar
 JOIN provinces p ON p.id = mar.province_id
 LEFT JOIN school_majors sm ON sm.school_id = mar.school_id AND sm.major_id = mar.major_id
@@ -920,7 +926,9 @@ SELECT
     ep.selection_requirement,
     ep.source_url,
     ep.data_source,
-    'enrollment_plans'::TEXT AS evidence_source
+    'enrollment_plans'::TEXT AS evidence_source,
+    NULL::TEXT AS min_rank_source,
+    FALSE AS min_rank_is_derived
 FROM enrollment_plans ep
 JOIN provinces p ON p.id = ep.province_id
 LEFT JOIN school_majors sm ON sm.school_id = ep.school_id AND sm.major_id = ep.major_id;
