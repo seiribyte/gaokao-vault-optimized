@@ -55,3 +55,13 @@ class TimelineItem(BaseModel):
     start_time: datetime | None = None
     end_time: datetime | None = None
     note: str | None = None
+
+
+class ProvincialAnnouncementItem(BaseModel):
+    province_id: int
+    year: int | None = Field(default=None, ge=2000, le=2100)
+    title: str
+    content: str | None = None
+    announcement_type: str | None = None
+    publish_date: date | None = None
+    source_url: str | None = None

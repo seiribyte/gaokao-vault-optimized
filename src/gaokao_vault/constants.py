@@ -13,6 +13,7 @@ class TaskType(str, Enum):
     MAJOR_CATEGORIES = "major_categories"
     MAJORS = "majors"
     SCHOOL_MAJORS = "school_majors"
+    MAJOR_STRENGTH_SIGNALS = "major_strength_signals"
     MAJOR_SATISFACTION = "major_satisfaction"
     DXSBB_ADMISSION_RESULTS = "dxsbb_admission_results"
     INTERPRETATIONS = "interpretations"
@@ -23,6 +24,7 @@ class TaskType(str, Enum):
     CHARTERS = "charters"
     TIMELINES = "timelines"
     SPECIAL = "special"
+    PROVINCIAL_ANNOUNCEMENTS = "provincial_announcements"
 
 
 PHASE2_TYPES = [
@@ -34,6 +36,7 @@ PHASE2_TYPES = [
 
 PHASE3_TYPES = [
     TaskType.SCHOOL_MAJORS,
+    TaskType.MAJOR_STRENGTH_SIGNALS,
     TaskType.SCORE_SEGMENTS,
     TaskType.ENROLLMENT_PLANS,
     TaskType.MAJOR_ADMISSION_RESULTS,
@@ -43,4 +46,5 @@ PHASE3_TYPES = [
     TaskType.SCHOOL_SATISFACTION,
     TaskType.MAJOR_SATISFACTION,
     TaskType.INTERPRETATIONS,
+    TaskType.PROVINCIAL_ANNOUNCEMENTS,
 ]

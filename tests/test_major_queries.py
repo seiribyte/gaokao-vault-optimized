@@ -35,9 +35,11 @@ class _FakeUpsertConnection:
 class _FakeExecuteConnection:
     def __init__(self) -> None:
         self.query = ""
+        self.queries: list[str] = []
 
-    async def execute(self, query: str) -> str:
+    async def execute(self, query: str, *args: object) -> str:
         self.query = query
+        self.queries.append(query)
         return "UPDATE 3"
 
 
@@ -194,6 +196,18 @@ def test_upsert_school_major_strength_signal_persists_authoritative_evidence() -
     )
 
 
+def test_school_major_strength_signals_are_deduplicated_by_authoritative_key() -> None:
+    from gaokao_vault.pipeline.dedup import TABLE_MAP
+
+    table, clause, fields = TABLE_MAP["school_major_strength_signals"]
+
+    assert table == "school_major_strength_signals"
+    assert "school_id = $1" in clause
+    assert "major_id = $2" in clause
+    assert "signal_type = $3" in clause
+    assert fields == ["school_id", "major_id", "signal_type", "signal_level", "evidence_year"]
+
+
 def test_refresh_school_major_strength_rollup_ranks_only_authoritative_signals() -> None:
     conn = _FakeExecuteConnection()
 
@@ -214,10 +228,29 @@ def test_refresh_school_major_strength_rollup_clears_stale_featured_flags_withou
 
     asyncio.run(refresh_school_major_strength_rollup(cast(Any, conn)))
 
-    assert "WITH ranked AS" in conn.query
+    assert "ranked AS" in conn.query
     assert "LEFT JOIN ranked" in conn.query
     assert "major_strength_rank = ranked.major_strength_rank" in conn.query
     assert "major_strength_score = ranked.major_strength_score" in conn.query
     assert "major_strength_tier = CASE" in conn.query
     assert "is_featured_major = COALESCE(ranked.major_strength_rank <= 3, FALSE)" in conn.query
     assert "strength_evidence = COALESCE(ranked.strength_evidence, '[]'::jsonb)" in conn.query
+
+
+def test_refresh_school_major_strength_rollup_can_scope_to_crawl_task() -> None:
+    conn = _FakeExecuteConnection()
+
+    asyncio.run(refresh_school_major_strength_rollup(cast(Any, conn), crawl_task_id=99))
+
+    assert "affected_schools AS" in conn.query
+    assert "crawl_task_id = $1" in conn.query
+
+
+def test_refresh_school_major_strength_rollup_updates_all_majors_for_affected_schools() -> None:
+    conn = _FakeExecuteConnection()
+
+    asyncio.run(refresh_school_major_strength_rollup(cast(Any, conn), crawl_task_id=99))
+
+    assert "affected_schools" in conn.query
+    assert "affected_schools affected" in conn.query
+    assert "affected.school_id = target.school_id" in conn.query

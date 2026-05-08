@@ -8,6 +8,8 @@ from gaokao_vault.spiders.interpretation_spider import InterpretationSpider
 from gaokao_vault.spiders.major_admission_result_spider import MajorAdmissionResultSpider
 from gaokao_vault.spiders.major_satisfaction_spider import MajorSatisfactionSpider
 from gaokao_vault.spiders.major_spider import MajorSpider
+from gaokao_vault.spiders.major_strength_signal_spider import MajorStrengthSignalSpider
+from gaokao_vault.spiders.provincial_announcement_spider import ProvincialAnnouncementSpider
 from gaokao_vault.spiders.school_major_spider import SchoolMajorSpider
 from gaokao_vault.spiders.school_satisfaction_spider import SchoolSatisfactionSpider
 from gaokao_vault.spiders.school_spider import SchoolSpider
@@ -25,6 +27,8 @@ __all__ = [
     "MajorAdmissionResultSpider",
     "MajorSatisfactionSpider",
     "MajorSpider",
+    "MajorStrengthSignalSpider",
+    "ProvincialAnnouncementSpider",
     "SchoolMajorSpider",
     "SchoolSatisfactionSpider",
     "SchoolSpider",

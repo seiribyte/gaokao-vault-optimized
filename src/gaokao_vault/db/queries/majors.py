@@ -143,10 +143,15 @@ async def upsert_school_major_strength_signal(conn: asyncpg.Connection, data: di
     return row["id"]
 
 
-async def refresh_school_major_strength_rollup(conn: asyncpg.Connection) -> str:
+async def refresh_school_major_strength_rollup(conn: asyncpg.Connection, crawl_task_id: int | None = None) -> str:
     return await conn.execute(
         """
-        WITH ranked AS (
+        WITH affected_schools AS (
+            SELECT DISTINCT school_id
+            FROM school_major_strength_signals
+            WHERE $1::BIGINT IS NULL OR crawl_task_id = $1
+        ),
+        ranked AS (
             SELECT
                 school_id,
                 major_id,
@@ -193,7 +198,16 @@ async def refresh_school_major_strength_rollup(conn: asyncpg.Connection) -> str:
             ON ranked.school_id = target.school_id
            AND ranked.major_id = target.major_id
         WHERE sm.id = target.id
-        """
+          AND (
+              $1::BIGINT IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM affected_schools affected
+                  WHERE affected.school_id = target.school_id
+              )
+          )
+        """,
+        crawl_task_id,
     )
 
 

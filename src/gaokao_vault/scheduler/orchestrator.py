@@ -19,6 +19,8 @@ from gaokao_vault.spiders.interpretation_spider import InterpretationSpider
 from gaokao_vault.spiders.major_admission_result_spider import MajorAdmissionResultSpider
 from gaokao_vault.spiders.major_satisfaction_spider import MajorSatisfactionSpider
 from gaokao_vault.spiders.major_spider import MajorSpider
+from gaokao_vault.spiders.major_strength_signal_spider import MajorStrengthSignalSpider
+from gaokao_vault.spiders.provincial_announcement_spider import ProvincialAnnouncementSpider
 from gaokao_vault.spiders.school_major_spider import SchoolMajorSpider
 from gaokao_vault.spiders.school_satisfaction_spider import SchoolSatisfactionSpider
 from gaokao_vault.spiders.school_spider import SchoolSpider
@@ -47,6 +49,7 @@ SPIDER_MAP: dict[str, type[BaseGaokaoSpider]] = {
     TaskType.SCORE_LINES: ScoreLineSpider,
     TaskType.TIMELINES: TimelineSpider,
     TaskType.SCHOOL_MAJORS: SchoolMajorSpider,
+    TaskType.MAJOR_STRENGTH_SIGNALS: MajorStrengthSignalSpider,
     TaskType.SCORE_SEGMENTS: ScoreSegmentSpider,
     TaskType.ENROLLMENT_PLANS: EnrollmentPlanSpider,
     TaskType.MAJOR_ADMISSION_RESULTS: MajorAdmissionResultSpider,
@@ -56,6 +59,7 @@ SPIDER_MAP: dict[str, type[BaseGaokaoSpider]] = {
     TaskType.SCHOOL_SATISFACTION: SchoolSatisfactionSpider,
     TaskType.MAJOR_SATISFACTION: MajorSatisfactionSpider,
     TaskType.INTERPRETATIONS: InterpretationSpider,
+    TaskType.PROVINCIAL_ANNOUNCEMENTS: ProvincialAnnouncementSpider,
 }
 
 

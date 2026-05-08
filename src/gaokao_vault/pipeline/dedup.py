@@ -17,6 +17,12 @@ TABLE_MAP: dict[str, tuple[str, str, list[str]]] = {
     "major_subcategories": ("major_subcategories", "category_id = $1 AND name = $2", ["category_id", "name"]),
     "majors": ("majors", "code = $1 AND education_level = $2", ["code", "education_level"]),
     "school_majors": ("school_majors", "school_id = $1 AND major_id = $2", ["school_id", "major_id"]),
+    "school_major_strength_signals": (
+        "school_major_strength_signals",
+        "school_id = $1 AND major_id = $2 AND signal_type = $3 "
+        "AND signal_level IS NOT DISTINCT FROM $4 AND evidence_year IS NOT DISTINCT FROM $5",
+        ["school_id", "major_id", "signal_type", "signal_level", "evidence_year"],
+    ),
     "major_satisfaction": ("major_satisfaction", "major_id = $1 AND school_id = $2", ["major_id", "school_id"]),
     "score_lines": (
         "admission_score_lines",
@@ -53,6 +59,11 @@ TABLE_MAP: dict[str, tuple[str, str, list[str]]] = {
         "major_interpretations",
         "major_id IS NOT DISTINCT FROM $1 AND title IS NOT DISTINCT FROM $2",
         ["major_id", "title"],
+    ),
+    "provincial_announcements": (
+        "provincial_announcements",
+        "province_id = $1 AND title = $2 AND source_url IS NOT DISTINCT FROM $3",
+        ["province_id", "title", "source_url"],
     ),
 }
 

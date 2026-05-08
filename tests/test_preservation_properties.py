@@ -338,6 +338,8 @@ class TestPhaseOrderingPreservation:
             TaskType.SCHOOL_SATISFACTION,
             TaskType.MAJOR_SATISFACTION,
             TaskType.INTERPRETATIONS,
+            TaskType.MAJOR_STRENGTH_SIGNALS,
+            TaskType.PROVINCIAL_ANNOUNCEMENTS,
         }
         assert set(PHASE3_TYPES) == expected
 
