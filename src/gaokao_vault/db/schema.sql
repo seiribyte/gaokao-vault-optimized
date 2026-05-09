@@ -688,6 +688,8 @@ CREATE TABLE IF NOT EXISTS provincial_announcements (
 );
 
 CREATE INDEX IF NOT EXISTS idx_announcements_province ON provincial_announcements(province_id, year);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_provincial_announcements_unique_key
+    ON provincial_announcements(province_id, title, source_url) NULLS NOT DISTINCT;
 
 DROP TRIGGER IF EXISTS update_provincial_announcements_updated_at ON provincial_announcements;
 CREATE TRIGGER update_provincial_announcements_updated_at BEFORE UPDATE ON provincial_announcements

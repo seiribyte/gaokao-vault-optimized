@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any, cast
 
-from gaokao_vault.db.queries.enrollment import upsert_enrollment_plan
+from gaokao_vault.db.queries.enrollment import upsert_enrollment_plan, upsert_provincial_announcement
 
 
 class _FakeConnection:
@@ -73,3 +73,40 @@ def test_upsert_enrollment_plan_preserves_rule_and_quality_fields() -> None:
     assert "物理+化学" in conn.args
     assert "https://gaokao.chsi.com.cn/test-plan" in conn.args
     assert json.dumps([], ensure_ascii=False) in conn.args
+
+
+def test_upsert_provincial_announcement_persists_official_source_fields() -> None:
+    conn = _FakeConnection()
+
+    announcement_id = asyncio.run(
+        upsert_provincial_announcement(
+            cast(Any, conn),
+            {
+                "province_id": 7,
+                "year": 2025,
+                "title": "吉林省2025年普通高校招生录取工作安排",
+                "content": "普通高校招生录取工作安排正文。",
+                "announcement_type": "admission",
+                "publish_date": "2025-07-01",
+                "source_url": "https://www.jleea.com.cn/2025/0701/notice.html",
+                "content_hash": "hash",
+                "crawl_task_id": 99,
+            },
+        )
+    )
+
+    assert announcement_id == 77
+    assert "INSERT INTO provincial_announcements" in conn.query
+    assert "ON CONFLICT (province_id, title, source_url) DO UPDATE SET" in conn.query
+    assert "announcement_type=EXCLUDED.announcement_type" in conn.query
+    assert conn.args == (
+        7,
+        2025,
+        "吉林省2025年普通高校招生录取工作安排",
+        "普通高校招生录取工作安排正文。",
+        "admission",
+        "2025-07-01",
+        "https://www.jleea.com.cn/2025/0701/notice.html",
+        "hash",
+        99,
+    )

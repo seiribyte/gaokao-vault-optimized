@@ -1,6 +1,11 @@
 from gaokao_vault.db.queries.admission import upsert_major_admission_result
 from gaokao_vault.db.queries.crawl_meta import create_task, find_latest_hash, insert_snapshot, update_task_stats
-from gaokao_vault.db.queries.enrollment import upsert_charter, upsert_enrollment_plan, upsert_timeline
+from gaokao_vault.db.queries.enrollment import (
+    upsert_charter,
+    upsert_enrollment_plan,
+    upsert_provincial_announcement,
+    upsert_timeline,
+)
 from gaokao_vault.db.queries.majors import (
     refresh_school_major_strength_rollup,
     upsert_major,
@@ -40,6 +45,7 @@ __all__ = [
     "upsert_major_interpretation",
     "upsert_major_satisfaction",
     "upsert_major_subcategory",
+    "upsert_provincial_announcement",
     "upsert_school",
     "upsert_school_major",
     "upsert_school_major_strength_signal",

@@ -13,6 +13,7 @@ from gaokao_vault.spiders import (
     MajorAdmissionResultSpider,
     MajorSatisfactionSpider,
     MajorSpider,
+    MajorStrengthSignalSpider,
     SchoolMajorSpider,
     SchoolSatisfactionSpider,
     SchoolSpider,
@@ -21,6 +22,7 @@ from gaokao_vault.spiders import (
     SpecialSpider,
     TimelineSpider,
 )
+from gaokao_vault.spiders.provincial_announcement_spider import ProvincialAnnouncementSpider
 
 
 class TestSpiderStructure:
@@ -40,6 +42,8 @@ class TestSpiderStructure:
             MajorSatisfactionSpider,
             InterpretationSpider,
             DxsbbAdmissionResultSpider,
+            MajorStrengthSignalSpider,
+            ProvincialAnnouncementSpider,
         ]
         for cls in spiders:
             assert hasattr(cls, "name"), f"{cls.__name__} missing 'name'"

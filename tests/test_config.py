@@ -56,11 +56,15 @@ class TestConstants:
     def test_task_types_enum(self):
         assert TaskType.SCHOOLS.value == "schools"
         assert TaskType.MAJORS.value == "majors"
-        assert len(TaskType) == 15
+        assert TaskType.MAJOR_STRENGTH_SIGNALS.value == "major_strength_signals"
+        assert TaskType.PROVINCIAL_ANNOUNCEMENTS.value == "provincial_announcements"
+        assert len(TaskType) == 17
 
     def test_phase_types(self):
         assert len(PHASE2_TYPES) == 4
-        assert len(PHASE3_TYPES) == 10
+        assert len(PHASE3_TYPES) == 12
         assert TaskType.SCHOOLS in PHASE2_TYPES
         assert TaskType.SCHOOL_MAJORS in PHASE3_TYPES
         assert TaskType.DXSBB_ADMISSION_RESULTS in PHASE3_TYPES
+        assert TaskType.MAJOR_STRENGTH_SIGNALS in PHASE3_TYPES
+        assert TaskType.PROVINCIAL_ANNOUNCEMENTS in PHASE3_TYPES

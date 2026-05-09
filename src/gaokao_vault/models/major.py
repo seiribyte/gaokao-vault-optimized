@@ -42,6 +42,17 @@ class SchoolMajorItem(BaseModel):
     strength_evidence: list[dict] = Field(default_factory=list)
 
 
+class SchoolMajorStrengthSignalItem(BaseModel):
+    school_id: int
+    major_id: int
+    signal_type: str
+    signal_level: str | None = None
+    strength_score: float
+    source_url: str | None = None
+    evidence_title: str | None = None
+    evidence_year: int | None = Field(default=None, ge=2000, le=2100)
+
+
 class MajorSatisfactionItem(BaseModel):
     major_id: int
     school_id: int | None = None

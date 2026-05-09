@@ -129,3 +129,34 @@ async def upsert_timeline(conn: asyncpg.Connection, data: dict) -> int:
         data.get("crawl_task_id"),
     )
     return row["id"]
+
+
+async def upsert_provincial_announcement(conn: asyncpg.Connection, data: dict) -> int:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO provincial_announcements (
+            province_id, year, title, content, announcement_type, publish_date,
+            source_url, content_hash, crawl_task_id
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        ON CONFLICT (province_id, title, source_url) DO UPDATE SET
+            year=EXCLUDED.year,
+            content=EXCLUDED.content,
+            announcement_type=EXCLUDED.announcement_type,
+            publish_date=EXCLUDED.publish_date,
+            content_hash=EXCLUDED.content_hash,
+            crawl_task_id=EXCLUDED.crawl_task_id,
+            updated_at=NOW()
+        RETURNING id
+        """,
+        data["province_id"],
+        data.get("year"),
+        data["title"],
+        data.get("content"),
+        data.get("announcement_type"),
+        data.get("publish_date"),
+        data.get("source_url"),
+        data.get("content_hash"),
+        data.get("crawl_task_id"),
+    )
+    return row["id"]
