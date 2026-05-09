@@ -7,6 +7,7 @@ from scrapling.parser import Adaptor
 
 from gaokao_vault.config import DatabaseConfig
 from gaokao_vault.spiders.major_strength_signal_spider import MajorStrengthSignalSpider
+from gaokao_vault.spiders.school_major_spider import SchoolMajorSpider
 
 
 class _Acquire:
@@ -54,6 +55,31 @@ async def _collect(async_gen) -> list:
     async for item in async_gen:
         items.append(item)
     return items
+
+
+def test_extract_major_candidates_uses_candidate_raw_text_without_reselecting_links() -> None:
+    spider = _make_spider()
+    response = _make_response("<html><body></body></html>", "https://gaokao.chsi.com.cn/sch/empty.dhtml")
+    raw_text = "计算机科学与技术 国家级一流本科专业建设点"
+
+    with patch.object(
+        SchoolMajorSpider,
+        "_extract_major_candidates",
+        return_value=[
+            {
+                "source_id": None,
+                "data_code": "080901",
+                "href_code": "080901",
+                "name": raw_text,
+                "href": "/zyk/080901",
+                "raw_text": raw_text,
+            }
+        ],
+    ):
+        candidates = spider._extract_major_candidates(response)
+
+    assert candidates[0]["raw_text"] == raw_text
+    assert candidates[0]["name"] == "计算机科学与技术"
 
 
 def test_parse_school_major_page_persists_authoritative_strength_signals() -> None:

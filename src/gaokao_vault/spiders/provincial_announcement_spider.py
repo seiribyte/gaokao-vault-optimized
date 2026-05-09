@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date, datetime
+from typing import ClassVar
 from urllib.parse import urlparse
 
 from scrapling.fetchers import FetcherSession
@@ -13,12 +15,26 @@ from gaokao_vault.models.enrollment import ProvincialAnnouncementItem
 from gaokao_vault.pipeline.validator import validate_item
 from gaokao_vault.spiders.base import BaseGaokaoSpider
 
-JILIN_PROVINCE_ID = 7
-JILIN_SOURCE_NAME = "吉林省教育考试院"
-JILIN_LIST_URLS = (
-    "https://www.jleea.com.cn/ptgxzs/",
-    "https://www.jleea.com.cn/ptgxzs/zhxx/",
-)
+
+@dataclass(frozen=True, slots=True)
+class ProvincialAnnouncementSource:
+    province_id: int
+    source_name: str
+    list_urls: tuple[str, ...]
+    allowed_domains: frozenset[str]
+
+
+PROVINCIAL_ANNOUNCEMENT_SOURCES = {
+    "jilin": ProvincialAnnouncementSource(
+        province_id=7,
+        source_name="吉林省教育考试院",
+        list_urls=(
+            "https://www.jleea.com.cn/ptgxzs/",
+            "https://www.jleea.com.cn/ptgxzs/zhxx/",
+        ),
+        allowed_domains=frozenset({"www.jleea.com.cn", "jleea.com.cn"}),
+    ),
+}
 
 
 class ProvincialAnnouncementSpider(BaseGaokaoSpider):
@@ -26,18 +42,26 @@ class ProvincialAnnouncementSpider(BaseGaokaoSpider):
 
     name: str = "provincial_announcement_spider"
     task_type: str = TaskType.PROVINCIAL_ANNOUNCEMENTS
-    allowed_domains = {"www.jleea.com.cn", "jleea.com.cn"}  # noqa: RUF012
+    allowed_domains: ClassVar[set[str]] = {
+        domain for source in PROVINCIAL_ANNOUNCEMENT_SOURCES.values() for domain in source.allowed_domains
+    }
 
     def configure_sessions(self, manager) -> None:
         manager.add("http", FetcherSession())
 
     async def start_requests(self):
-        for url in JILIN_LIST_URLS:
-            yield Request(
-                url,
-                callback=self.parse,
-                meta={"province_id": JILIN_PROVINCE_ID, "source_name": JILIN_SOURCE_NAME},
-            )
+        for source_key, source in PROVINCIAL_ANNOUNCEMENT_SOURCES.items():
+            for url in source.list_urls:
+                yield Request(
+                    url,
+                    callback=self.parse,
+                    meta={
+                        "province_id": source.province_id,
+                        "source_name": source.source_name,
+                        "source_key": source_key,
+                        "allowed_domains": source.allowed_domains,
+                    },
+                )
 
     async def parse(self, response: Response):
         if response.status == 404 or response.request is None:
@@ -46,6 +70,7 @@ class ProvincialAnnouncementSpider(BaseGaokaoSpider):
         province_id = response.request.meta.get("province_id")
         if not province_id:
             return
+        allowed_domains = frozenset(response.request.meta.get("allowed_domains") or self.allowed_domains)
 
         seen: set[str] = set()
         for link in response.css("a[href]"):
@@ -55,7 +80,7 @@ class ProvincialAnnouncementSpider(BaseGaokaoSpider):
                 continue
 
             detail_url = response.urljoin(href)
-            if not _is_allowed_jilin_url(detail_url) or detail_url in seen:
+            if not _is_allowed_source_url(detail_url, allowed_domains) or detail_url in seen:
                 continue
             seen.add(detail_url)
 
@@ -64,6 +89,9 @@ class ProvincialAnnouncementSpider(BaseGaokaoSpider):
                 callback=self.parse_detail,
                 meta={
                     "province_id": province_id,
+                    "source_key": response.request.meta.get("source_key"),
+                    "source_name": response.request.meta.get("source_name"),
+                    "allowed_domains": allowed_domains,
                     "title": title,
                     "publish_date": _extract_date_near_link(link),
                 },
@@ -121,9 +149,9 @@ def _looks_like_announcement(title: str) -> bool:
     return any(keyword in title for keyword in keywords)
 
 
-def _is_allowed_jilin_url(url: str) -> bool:
+def _is_allowed_source_url(url: str, allowed_domains: frozenset[str]) -> bool:
     host = urlparse(url).netloc.lower()
-    return host in {"www.jleea.com.cn", "jleea.com.cn"}
+    return host in allowed_domains
 
 
 def _extract_date_near_link(link) -> str:

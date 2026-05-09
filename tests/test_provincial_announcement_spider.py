@@ -7,6 +7,7 @@ from scrapling.parser import Adaptor
 from scrapling.spiders import Request
 
 from gaokao_vault.config import DatabaseConfig
+from gaokao_vault.spiders import provincial_announcement_spider
 from gaokao_vault.spiders.provincial_announcement_spider import ProvincialAnnouncementSpider
 
 
@@ -49,6 +50,18 @@ def test_start_requests_targets_jilin_official_announcement_lists() -> None:
     assert all("jleea.com.cn" in request.url for request in requests)
     assert all(request.meta["province_id"] == 7 for request in requests)
     assert all(request.meta["source_name"] == "吉林省教育考试院" for request in requests)
+
+
+def test_start_requests_are_derived_from_provincial_source_config() -> None:
+    spider = _make_spider()
+    source = provincial_announcement_spider.PROVINCIAL_ANNOUNCEMENT_SOURCES["jilin"]
+
+    requests = asyncio.run(_collect(spider.start_requests()))
+
+    assert [request.url for request in requests] == list(source.list_urls)
+    assert all(request.meta["source_key"] == "jilin" for request in requests)
+    assert all(request.meta["allowed_domains"] == source.allowed_domains for request in requests)
+    assert spider.allowed_domains == set(source.allowed_domains)
 
 
 def test_parse_jilin_list_yields_official_detail_requests() -> None:

@@ -103,6 +103,7 @@ class SchoolMajorSpider(BaseGaokaoSpider):
         for link in response.css("div.yxk-zyjs-tab ul li a, div.major-list a.major-link"):
             href = link.attrib.get("href", "").strip()
             name_parts = [part.strip() for part in link.css("::text").getall() if part.strip()]
+            raw_text = " ".join(name_parts).strip() or None
             name = name_parts[0] if name_parts else None
             data_code = link.attrib.get("data-code", "").strip() or None
             href_code = self._extract_code_from_href(href)
@@ -115,6 +116,7 @@ class SchoolMajorSpider(BaseGaokaoSpider):
                 "href_code": href_code,
                 "name": name,
                 "href": href or None,
+                "raw_text": raw_text,
             })
         return candidates
 
