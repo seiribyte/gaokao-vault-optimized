@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from scrapling.parser import Adaptor
 
 from gaokao_vault.config import DatabaseConfig
+from gaokao_vault.spiders.dxsbb_score_segments import DxsbbSegmentRecord
 from gaokao_vault.spiders.score_segment_spider import (
     DXSBB_SEGMENT_INDEX_URL,
     ScoreSegmentSpider,
@@ -260,12 +261,12 @@ def test_parse_dxsbb_article_uses_vision_for_image_segment_table() -> None:
     with (
         patch.object(spider, "_resolve_subject_category", new=AsyncMock(return_value=3)),
         patch.object(
-            spider,
-            "_analyze_dxsbb_segment_image",
+            spider._dxsbb,
+            "analyze_segment_image",
             new=AsyncMock(
                 return_value=[
-                    {"category": "物理类", "score": 600, "segment_count": 120, "cumulative_count": 5529},
-                    {"category": "物理类", "score": 599, "segment_count": 130, "cumulative_count": 5659},
+                    DxsbbSegmentRecord(category="物理类", score=600, segment_count=120, cumulative_count=5529),
+                    DxsbbSegmentRecord(category="物理类", score=599, segment_count=130, cumulative_count=5659),
                 ]
             ),
         ) as analyze_image,

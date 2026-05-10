@@ -3,11 +3,8 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime
-from functools import cache
 from html import unescape
-from pathlib import Path
 from typing import ClassVar
-from urllib.parse import urljoin
 
 from scrapling.fetchers import FetcherSession
 from scrapling.spiders import Request, Response
@@ -20,10 +17,12 @@ from gaokao_vault.pipeline.hasher import compute_content_hash
 from gaokao_vault.pipeline.sink import BatchSink
 from gaokao_vault.pipeline.validator import validate_item
 from gaokao_vault.spiders.base import BaseGaokaoSpider
-from gaokao_vault.spiders.dxsbb import DXSBB_BASE_URL
+from gaokao_vault.spiders.dxsbb_score_segments import (
+    DXSBB_SEGMENT_INDEX_URL,
+    DxsbbScoreSegmentParser,
+)
 from gaokao_vault.spiders.response_utils import response_text
 from gaokao_vault.spiders.scope import iter_crawl_years, load_province_targets
-from gaokao_vault.vision.analyzer import VisionAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +31,6 @@ YEAR_END = datetime.now().year
 EOL_SEGMENT_INDEX_URL = "https://www.eol.cn/e_html/gk/gkfsd/"
 EOL_SEGMENT_YEAR_INDEX_URL_TEMPLATE = "https://www.eol.cn/e_html/gk/gkfsd/{year}.shtml"
 EOL_DATA_SOURCE = "gaokao.eol.cn"
-DXSBB_SEGMENT_INDEX_URL = f"{DXSBB_BASE_URL}/news/list_223.html"
-DXSBB_DATA_SOURCE = "dxsbb.com"
 _SEGMENT_LINK_KEYWORDS = ("一分一段", "一分段", "成绩分段", "成绩分数段", "成绩分布", "分段表")
 _SUBJECT_HINTS = ("物理类", "历史类", "理科", "文科", "综合", "艺术类", "体育类")
 
@@ -66,7 +63,7 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
             **kwargs,
         )
         self._sink: BatchSink | None = None
-        self._app_config = app_config
+        self._dxsbb = DxsbbScoreSegmentParser(app_config)
 
     def configure_sessions(self, manager) -> None:
         manager.add(
@@ -159,51 +156,16 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
             return
 
         meta = response.request.meta
-        province_by_name = {province["name"]: province for province in meta.get("provinces") or []}
-        allowed_years = set(meta.get("years") or [])
-        seen_urls: set[str] = set()
-
-        for link in response.css("a[href]"):
-            href = link.attrib.get("href", "").strip()
-            title = _node_text(link).strip()
-            if not href or not title:
-                continue
-
-            province = _find_province_for_text(title, province_by_name)
-            if province is None:
-                continue
-
-            url = urljoin(DXSBB_BASE_URL, href)
-            if url in seen_urls:
-                continue
-            seen_urls.add(url)
-
-            if "/news/list_" in url:
-                yield Request(url, callback=self.parse_dxsbb_index, meta=meta)
-                continue
-
-            if not _looks_like_segment_link(title):
-                continue
-
-            year = _extract_year(f"{title} {href}")
-            if year is not None and year not in allowed_years:
-                continue
-
-            if year is None:
-                continue
-
+        for target in self._dxsbb.iter_index_targets(
+            response,
+            provinces=meta.get("provinces") or [],
+            allowed_years=set(meta.get("years") or []),
+            index_meta=meta,
+        ):
             yield Request(
-                url,
-                callback=self.parse_dxsbb_article,
-                meta={
-                    "province_id": province["id"],
-                    "province_name": province["name"],
-                    "province_code": province["code"],
-                    "year": year,
-                    "subject_hint": _extract_subject_hint(title),
-                    "data_source": DXSBB_DATA_SOURCE,
-                    "title": title,
-                },
+                target.url,
+                callback=self.parse_dxsbb_index if target.is_index else self.parse_dxsbb_article,
+                meta=target.meta,
             )
 
     async def parse(self, response: Response):
@@ -291,156 +253,45 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
         if response.request is None or response.status == 404:
             return
 
-        meta = response.request.meta
-        province_id = meta.get("province_id")
-        province_name = meta.get("province_name") or ""
-        year = meta.get("year")
-        subject_hint = meta.get("subject_hint") or _extract_subject_hint(
-            meta.get("title") or _node_text(response.css("#article h1, h1, title"))
-        )
-
-        if not province_id or not year:
+        context = self._dxsbb.article_context(response)
+        if context is None:
             return
 
-        parsed_rows = 0
-        async for item in self._parse_dxsbb_article_tables(
-            response,
-            province_id=province_id,
-            year=year,
-            subject_hint=subject_hint,
-        ):
-            parsed_rows += 1
+        table_records = self._dxsbb.table_records(response, subject_hint=context.subject_hint)
+        emitted_table_items = 0
+        for record in table_records:
+            item = await self._dxsbb.build_item(
+                record,
+                province_id=context.province_id,
+                year=context.year,
+                resolve_subject_category=self._resolve_subject_category,
+            )
+            if item is None:
+                continue
             yield item
-        if parsed_rows:
+            await self._add_to_sink(item)
+            emitted_table_items += 1
+        if emitted_table_items:
             return
 
-        for image_url in _dxsbb_segment_image_urls(response):
-            records = await self._analyze_dxsbb_segment_image(
+        for image_url in self._dxsbb.image_urls(response):
+            records = await self._dxsbb.analyze_segment_image(
                 image_url,
-                province_name=province_name,
-                year=year,
-                subject_hint=subject_hint,
+                province_name=context.province_name,
+                year=context.year,
+                subject_hint=context.subject_hint,
             )
             for record in records:
-                item = await self._build_dxsbb_segment_item(
+                item = await self._dxsbb.build_item(
                     record,
-                    province_id=province_id,
-                    year=year,
-                    fallback_subject_hint=subject_hint,
+                    province_id=context.province_id,
+                    year=context.year,
+                    resolve_subject_category=self._resolve_subject_category,
                 )
                 if item is None:
                     continue
                 yield item
                 await self._add_to_sink(item)
-
-    async def _parse_dxsbb_article_tables(
-        self,
-        response: Response,
-        *,
-        province_id: int,
-        year: int,
-        subject_hint: str | None,
-    ):
-        for table in response.css("#article .content table, #article table, .content table"):
-            if not _looks_like_segment_table(table):
-                continue
-            async for item in self._parse_segment_table(
-                table, province_id=province_id, year=year, subject_hint=subject_hint
-            ):
-                yield item
-
-    async def _parse_segment_table(self, table, *, province_id: int, year: int, subject_hint: str | None):
-        header_map: dict[str, int] | None = None
-        for row in table.css("tr"):
-            cells = row.css("td, th")
-            if len(cells) < 3:
-                continue
-
-            values = [_node_text(cell).strip() for cell in cells]
-            if _looks_like_segment_header(values):
-                header_map = {value: index for index, value in enumerate(values) if value}
-                continue
-
-            score_index = _column_index(header_map, ("分数", "分数段"), 0)
-            segment_index = _column_index(header_map, ("本段人数", "人数", "同分人数"), 1)
-            cumulative_index = _column_index(header_map, ("累计人数", "累计", "位次"), 2)
-            category_index = _column_index(header_map, ("科类", "类别"), -1)
-
-            score = _parse_score(_cell_text(values, score_index))
-            segment_count = _parse_count(_cell_text(values, segment_index))
-            cumulative_count = _parse_count(_cell_text(values, cumulative_index))
-            if score is None or segment_count is None or cumulative_count is None:
-                continue
-
-            category = _cell_text(values, category_index) or subject_hint or ""
-            subject_category_id = await self._resolve_subject_category(category)
-            data = {
-                "province_id": province_id,
-                "year": year,
-                "subject_category_id": subject_category_id,
-                "score": score,
-                "segment_count": segment_count,
-                "cumulative_count": cumulative_count,
-            }
-            item = validate_item(ScoreSegmentItem, data)
-            if item:
-                yield item
-                await self._add_to_sink(item)
-
-    async def _build_dxsbb_segment_item(
-        self,
-        record: dict,
-        *,
-        province_id: int,
-        year: int,
-        fallback_subject_hint: str | None,
-    ) -> dict | None:
-        score = _parse_score(str(record.get("score") or ""))
-        segment_count = _parse_count(str(record.get("segment_count") or ""))
-        cumulative_count = _parse_count(str(record.get("cumulative_count") or ""))
-        if score is None or segment_count is None or cumulative_count is None:
-            return None
-
-        category = str(record.get("category") or fallback_subject_hint or "")
-        subject_category_id = await self._resolve_subject_category(category)
-        return validate_item(
-            ScoreSegmentItem,
-            {
-                "province_id": province_id,
-                "year": year,
-                "subject_category_id": subject_category_id,
-                "score": score,
-                "segment_count": segment_count,
-                "cumulative_count": cumulative_count,
-            },
-        )
-
-    async def _analyze_dxsbb_segment_image(
-        self,
-        image_url: str,
-        *,
-        province_name: str,
-        year: int,
-        subject_hint: str | None,
-    ) -> list[dict]:
-        if self._app_config is None:
-            logger.warning(
-                "No OpenAI config available; skipping dxsbb image segment extraction for %s %d", province_name, year
-            )
-            return []
-
-        prompt = _score_segment_prompt_template().format(
-            province_name=province_name,
-            year=year,
-            subject_hint=subject_hint or "",
-        )
-        analyzer = VisionAnalyzer(self._app_config.openai)
-        return await analyzer.analyze_image_url(
-            image_url,
-            prompt=prompt,
-            province_name=province_name,
-            year=year,
-        )
 
     async def _add_to_sink(self, item: dict) -> None:
         item["content_hash"] = compute_content_hash(item)
@@ -461,12 +312,6 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
 def _latest_eol_index_year() -> int:
     now = datetime.now()
     return now.year if now.month >= 7 else now.year - 1
-
-
-@cache
-def _score_segment_prompt_template() -> str:
-    prompt_path = Path(__file__).parents[1] / "vision" / "prompts" / "score_segment_extract.txt"
-    return prompt_path.read_text(encoding="utf-8")
 
 
 def _node_text(node) -> str:
@@ -506,11 +351,6 @@ def _index_blocks_from_html(html: str) -> list[tuple[str, list[tuple[str, str]]]
     return blocks
 
 
-def _find_province_for_text(text: str, province_by_name: dict[str, dict]) -> dict | None:
-    matches = [province for name, province in province_by_name.items() if name and name in text]
-    return matches[0] if matches else None
-
-
 def _strip_tags(value: str) -> str:
     return unescape(re.sub(r"<[^>]+>", "", value)).strip()
 
@@ -522,45 +362,6 @@ def _looks_like_segment_link(text: str) -> bool:
 def _looks_like_segment_table(table) -> bool:
     first_row_text = _node_text(table.css("tr")).strip()
     return "分数" in first_row_text and ("人数" in first_row_text or "累计" in first_row_text)
-
-
-def _looks_like_segment_header(values: list[str]) -> bool:
-    joined = "|".join(values)
-    return "分数" in joined and ("人数" in joined or "累计" in joined or "位次" in joined)
-
-
-def _column_index(header_map: dict[str, int] | None, names: tuple[str, ...], default: int) -> int:
-    if header_map is None:
-        return default
-    for name in names:
-        for header, index in header_map.items():
-            if name in header:
-                return index
-    return default
-
-
-def _cell_text(values: list[str], index: int) -> str:
-    if index < 0 or index >= len(values):
-        return ""
-    return values[index]
-
-
-def _dxsbb_segment_image_urls(response: Response) -> list[str]:
-    urls: list[str] = []
-    seen: set[str] = set()
-    for image in response.css("#article .content img[src], #article img[src], .content img[src]"):
-        src = image.attrib.get("src", "").strip()
-        alt = image.attrib.get("alt", "").strip()
-        if not src:
-            continue
-        if not (_looks_like_segment_link(alt) or _looks_like_segment_link(src) or "uploads" in src):
-            continue
-        url = urljoin(DXSBB_BASE_URL, src)
-        if url in seen:
-            continue
-        seen.add(url)
-        urls.append(url)
-    return urls
 
 
 def _extract_year(text: str) -> int | None:
