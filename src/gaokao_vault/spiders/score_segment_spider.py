@@ -9,6 +9,7 @@ from typing import ClassVar
 from scrapling.fetchers import FetcherSession
 from scrapling.spiders import Request, Response
 
+from gaokao_vault.config import AppConfig, CrawlConfig, DatabaseConfig
 from gaokao_vault.constants import TaskType
 from gaokao_vault.db.queries.scores import batch_upsert_score_segments
 from gaokao_vault.models.score import ScoreSegmentItem
@@ -16,6 +17,10 @@ from gaokao_vault.pipeline.hasher import compute_content_hash
 from gaokao_vault.pipeline.sink import BatchSink
 from gaokao_vault.pipeline.validator import validate_item
 from gaokao_vault.spiders.base import BaseGaokaoSpider
+from gaokao_vault.spiders.dxsbb_score_segments import (
+    DXSBB_SEGMENT_INDEX_URL,
+    DxsbbScoreSegmentParser,
+)
 from gaokao_vault.spiders.response_utils import response_text
 from gaokao_vault.spiders.scope import iter_crawl_years, load_province_targets
 
@@ -35,14 +40,30 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
 
     name: str = "score_segment_spider"
     task_type: str = TaskType.SCORE_SEGMENTS
-    allowed_domains: ClassVar[set[str]] = {"www.eol.cn", "gaokao.eol.cn"}
+    allowed_domains: ClassVar[set[str]] = {"www.eol.cn", "gaokao.eol.cn", "www.dxsbb.com", "dxsbb.com"}
 
     concurrent_requests = 3
     download_delay = 2.0
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        db_config: DatabaseConfig,
+        crawl_task_id: int,
+        mode: str = "full",
+        config: CrawlConfig | None = None,
+        app_config: AppConfig | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            db_config=db_config,
+            crawl_task_id=crawl_task_id,
+            mode=mode,
+            config=config,
+            app_config=app_config,
+            **kwargs,
+        )
         self._sink: BatchSink | None = None
+        self._dxsbb = DxsbbScoreSegmentParser(app_config)
 
     def configure_sessions(self, manager) -> None:
         manager.add(
@@ -88,6 +109,12 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
                 meta={"provinces": province_meta, "years": years},
             )
 
+        yield Request(
+            DXSBB_SEGMENT_INDEX_URL,
+            callback=self.parse_dxsbb_index,
+            meta={"provinces": province_meta, "years": years},
+        )
+
     async def parse_index(self, response: Response):
         if response.request is None:
             return
@@ -123,6 +150,23 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
                         "data_source": EOL_DATA_SOURCE,
                     },
                 )
+
+    async def parse_dxsbb_index(self, response: Response):
+        if response.request is None or response.status == 404:
+            return
+
+        meta = response.request.meta
+        for target in self._dxsbb.iter_index_targets(
+            response,
+            provinces=meta.get("provinces") or [],
+            allowed_years=set(meta.get("years") or []),
+            index_meta=meta,
+        ):
+            yield Request(
+                target.url,
+                callback=self.parse_dxsbb_index if target.is_index else self.parse_dxsbb_article,
+                meta=target.meta,
+            )
 
     async def parse(self, response: Response):
         if response.request is None:
@@ -204,6 +248,50 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
                 if item:
                     yield item
                     await self._add_to_sink(item)
+
+    async def parse_dxsbb_article(self, response: Response):
+        if response.request is None or response.status == 404:
+            return
+
+        context = self._dxsbb.article_context(response)
+        if context is None:
+            return
+
+        table_records = self._dxsbb.table_records(response, subject_hint=context.subject_hint)
+        emitted_table_items = 0
+        for record in table_records:
+            item = await self._dxsbb.build_item(
+                record,
+                province_id=context.province_id,
+                year=context.year,
+                resolve_subject_category=self._resolve_subject_category,
+            )
+            if item is None:
+                continue
+            yield item
+            await self._add_to_sink(item)
+            emitted_table_items += 1
+        if emitted_table_items:
+            return
+
+        for image_url in self._dxsbb.image_urls(response):
+            records = await self._dxsbb.analyze_segment_image(
+                image_url,
+                province_name=context.province_name,
+                year=context.year,
+                subject_hint=context.subject_hint,
+            )
+            for record in records:
+                item = await self._dxsbb.build_item(
+                    record,
+                    province_id=context.province_id,
+                    year=context.year,
+                    resolve_subject_category=self._resolve_subject_category,
+                )
+                if item is None:
+                    continue
+                yield item
+                await self._add_to_sink(item)
 
     async def _add_to_sink(self, item: dict) -> None:
         item["content_hash"] = compute_content_hash(item)
