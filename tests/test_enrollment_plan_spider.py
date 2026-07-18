@@ -379,6 +379,32 @@ def test_parse_school_name_index_yields_per_school_plan_dictionaries() -> None:
     }
 
 
+def test_school_name_index_supports_reference_aliases_and_military_prefixes() -> None:
+    spider = _make_spider()
+    response = _make_json_response(
+        {
+            "code": "0000",
+            "data": [
+                {"school_id": "100", "name": "山东大学(威海)"},
+                {"school_id": "200", "name": "中国人民解放军空军军医大学"},
+            ],
+        },
+        "https://static-data.gaokao.cn/www/2.0/school/name.json",
+        {
+            "schools": [
+                {"id": 1, "sch_id": 1, "name": "山东大学威海分校"},
+                {"id": 2, "sch_id": 2, "name": "空军军医大学"},
+            ],
+            "provinces": [{"id": 6, "name": "辽宁", "code": "21"}],
+            "years": [2026],
+        },
+    )
+
+    requests = asyncio.run(_collect(spider.parse_school_name_index(response)))
+
+    assert [request.meta["gaokao_school_id"] for request in requests] == ["100", "200"]
+
+
 def test_select_plan_years_uses_previous_three_years_before_december() -> None:
     assert enrollment_plan_spider._select_plan_years("incremental", datetime(2026, 5, 5)) == [2025, 2024, 2023]
 

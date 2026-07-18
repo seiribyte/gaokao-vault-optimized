@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 
 from gaokao_vault.constants import TaskType
 from gaokao_vault.scheduler.orchestrator import Orchestrator
@@ -24,8 +25,14 @@ async def run_liaoning_profile(
     orchestrator: Orchestrator,
     *,
     refresh_catalog: bool = True,
+    reference_path: Path | None = None,
 ) -> dict[str, dict[str, int]]:
     results: dict[str, dict[str, int]] = {}
+    if reference_path is not None:
+        from gaokao_vault.scheduler.reference_catalog import sync_reference_schools
+
+        async with orchestrator.db_pool.acquire() as conn:
+            results["reference_catalog"] = await sync_reference_schools(conn, reference_path)
     stages: Sequence[Sequence[str]] = (*(_CATALOG_STAGES if refresh_catalog else ()), *_LIAONING_STAGES)
     for stage_number, task_types in enumerate(stages, start=1):
         logger.info("辽宁专项抓取阶段 %d: %s", stage_number, task_types)

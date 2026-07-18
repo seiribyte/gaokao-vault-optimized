@@ -93,6 +93,12 @@ _PLAN_TABLE_HEADERS = (
     "办学地点",
     "就读地点",
 )
+_SCHOOL_NAME_ALIASES = {
+    "复旦大学医学院": "复旦大学上海医学院",
+    "山东大学威海分校": "山东大学(威海)",
+    "电子科技大学(沙河校区)": "电子科技大学",
+    "西南大学(荣昌校区)": "西南大学",
+}
 
 
 class EnrollmentPlanSpider(BaseGaokaoSpider):
@@ -184,7 +190,8 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         years = response.request.meta.get("years") or []
         for school in response.request.meta.get("schools") or []:
             school_name = _safe_text(school.get("name"))
-            gaokao_school_id = school_index.get(_normalize_school_name(school_name or ""))
+            lookup_name = _SCHOOL_NAME_ALIASES.get(school_name or "", school_name or "")
+            gaokao_school_id = school_index.get(_normalize_school_name(lookup_name))
             if not gaokao_school_id:
                 logger.debug("Skipping enrollment plan for unmatched school=%s", school_name)
                 continue
@@ -524,14 +531,19 @@ def _build_gaokao_school_index(rows: Any) -> dict[str, str]:
         if not school_id:
             continue
         for name_key in ("name", "old_name"):
-            name = _normalize_school_name(_first_text(row.get(name_key)) or "")
-            if name and name not in school_index:
-                school_index[name] = school_id
+            raw_name = _first_text(row.get(name_key)) or ""
+            names = [raw_name]
+            if raw_name.startswith("中国人民解放军"):
+                names.append(raw_name.removeprefix("中国人民解放军"))
+            for candidate in names:
+                name = _normalize_school_name(candidate)
+                if name and name not in school_index:
+                    school_index[name] = school_id
     return school_index
 
 
 def _normalize_school_name(name: str) -> str:
-    return "".join(name.split())
+    return "".join(name.split()).translate(str.maketrans({"(": chr(0xFF08), ")": chr(0xFF09)}))
 
 
 def _gaokao_subject_category(record: dict[str, Any]) -> str | None:

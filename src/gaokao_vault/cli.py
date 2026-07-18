@@ -265,7 +265,11 @@ def crawl_liaoning(
                 db_config=config.db,
                 app_config=scoped_config,
             )
-            await run_liaoning_profile(orchestrator, refresh_catalog=refresh_catalog)
+            await run_liaoning_profile(
+                orchestrator,
+                refresh_catalog=refresh_catalog,
+                reference_path=baseline,
+            )
             return await export_liaoning_workbook(
                 pool,
                 output_path,
