@@ -45,4 +45,5 @@ def test_liaoning_profile_can_reuse_catalog() -> None:
     calls = [args.args[0] for args in orchestrator.run_single.await_args_list]
     assert "schools" not in calls
     assert "majors" not in calls
-    assert calls[0] == "school_majors"
+    assert "school_majors" not in calls
+    assert calls[0] == "score_segments"

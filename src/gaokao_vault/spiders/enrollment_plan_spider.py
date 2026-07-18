@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, ClassVar
@@ -35,6 +36,13 @@ YEAR_START = 2020
 DATA_SOURCE = "gaokao.cn"
 CHSI_DATA_SOURCE = "gaokao.chsi.com.cn"
 GAOKAO_STATIC_BASE_URL = "https://static-data.gaokao.cn"
+GAOKAO_WEB_ORIGIN = "https://www.gaokao.cn"
+PLAN_API_RATE_LIMIT_CODE = "1069"
+PLAN_API_BACKOFF_SECONDS = 20.0
+PLAN_API_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+)
 SCHOOL_NAME_INDEX_URL = f"{GAOKAO_STATIC_BASE_URL}/www/2.0/school/name.json"
 # Correct dictionary path (legacy /yk/school/... is 404).
 PLAN_DICTIONARY_URL_TEMPLATE = f"{GAOKAO_STATIC_BASE_URL}/www/2.0/school/{{school_id}}/dic/specialplan.json"
@@ -97,18 +105,47 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
     concurrent_requests = 8
     concurrent_requests_per_domain = 4
     download_delay = 0.2
+    max_blocked_retries = 6
 
     def configure_sessions(self, manager) -> None:
         manager.add(
             "http",
             FetcherSession(
                 timeout=30,
+                impersonate="chrome",
                 headers={
-                    "Referer": "https://www.gaokao.cn/",
+                    "Referer": f"{GAOKAO_WEB_ORIGIN}/",
+                    "Origin": GAOKAO_WEB_ORIGIN,
                     "Accept": "application/json,text/plain,*/*",
+                    "User-Agent": PLAN_API_USER_AGENT,
                 },
             ),
         )
+
+    async def is_blocked(self, response: Response) -> bool:
+        if str(response.url).startswith("https://api.zjzw.cn/"):
+            payload = response_json(response)
+            if payload is not None:
+                code = str(payload.get("code", ""))
+                if code == "0000":
+                    return False
+                if code == PLAN_API_RATE_LIMIT_CODE:
+                    return True
+        return await super().is_blocked(response)
+
+    async def retry_blocked_request(self, request: Request, response: Response) -> Request:
+        request.sid = "http"
+        retry_count = max(request._retry_count, 1)
+        backoff = PLAN_API_BACKOFF_SECONDS * retry_count
+        logger.warning(
+            "招生计划 API 触发限流 url=%s status=%s retry=%d backoff=%.0fs",
+            request.url,
+            response.status,
+            retry_count,
+            backoff,
+        )
+        await asyncio.sleep(backoff)
+        return request
 
     async def start_requests(self):
         pool = await self._get_pool()

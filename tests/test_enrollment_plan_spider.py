@@ -6,6 +6,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from scrapling.parser import Adaptor
+from scrapling.spiders import Request
 
 import gaokao_vault.spiders.enrollment_plan_spider as enrollment_plan_spider
 from gaokao_vault.config import DatabaseConfig
@@ -294,6 +295,56 @@ def test_start_requests_bootstraps_gaokao_school_name_index() -> None:
     assert requests[0].callback == spider.parse_school_name_index
     assert requests[0].meta["schools"] == [{"id": 1, "sch_id": 34, "name": "苏州大学"}]
     assert requests[0].meta["provinces"] == [{"id": 7, "name": "吉林", "code": "22"}]
+
+
+def test_configure_sessions_uses_browser_headers_for_plan_api() -> None:
+    spider = _make_spider()
+    manager = MagicMock()
+
+    with patch("gaokao_vault.spiders.enrollment_plan_spider.FetcherSession") as session_cls:
+        spider.configure_sessions(manager)
+
+    kwargs = session_cls.call_args.kwargs
+    assert kwargs["impersonate"] == "chrome"
+    assert kwargs["headers"]["Origin"] == "https://www.gaokao.cn"
+    assert kwargs["headers"]["Referer"] == "https://www.gaokao.cn/"
+    assert kwargs["headers"]["User-Agent"].startswith("Mozilla/5.0")
+
+
+def test_plan_api_success_payload_is_not_blocked_by_content_text() -> None:
+    spider = _make_spider()
+    response = _make_json_response(
+        {"code": "0000", "message": "成功", "data": {"item": [{"remark": "系统繁忙专业方向"}]}},
+        "https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school",
+    )
+
+    assert asyncio.run(spider.is_blocked(response)) is False
+
+
+def test_plan_api_business_rate_limit_is_blocked() -> None:
+    spider = _make_spider()
+    response = _make_json_response(
+        {"code": "1069", "message": "请求受限", "data": None},
+        "https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school",
+    )
+
+    assert asyncio.run(spider.is_blocked(response)) is True
+
+
+def test_plan_api_retry_keeps_http_session_and_backs_off() -> None:
+    spider = _make_spider()
+    request = Request("https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school", sid="http")
+    request._retry_count = 2
+    response = _make_json_response(
+        {"code": "1069", "message": "请求受限", "data": None},
+        request.url,
+    )
+
+    with patch("gaokao_vault.spiders.enrollment_plan_spider.asyncio.sleep", new=AsyncMock()) as sleep:
+        retried = asyncio.run(spider.retry_blocked_request(request, response))
+
+    assert retried.sid == "http"
+    sleep.assert_awaited_once_with(40.0)
 
 
 def test_parse_school_name_index_yields_per_school_plan_dictionaries() -> None:
