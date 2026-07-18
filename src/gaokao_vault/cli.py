@@ -241,7 +241,7 @@ def crawl_liaoning(
     scoped_crawl = config.crawl.model_copy(
         update={
             "target_provinces": ["辽宁"],
-            "target_year_start": plan_year - 4,
+            "target_year_start": plan_year,
             "target_year_end": plan_year,
         }
     )

@@ -80,7 +80,7 @@ def test_crawl_liaoning_passes_scoped_config_and_exports_subject() -> None:
     assert result.exit_code == 0
     scoped_crawl = orchestrator_cls.call_args.kwargs["config"]
     assert scoped_crawl.target_provinces == ["辽宁"]
-    assert scoped_crawl.target_year_start == 2022
+    assert scoped_crawl.target_year_start == 2026
     assert scoped_crawl.target_year_end == 2026
     run_profile.assert_awaited_once_with(orchestrator, refresh_catalog=False, reference_path=None)
     export_args = export_workbook.await_args

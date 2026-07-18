@@ -15,6 +15,7 @@ from openpyxl import load_workbook
 
 _SEARCH_URL = "https://gaokao.chsi.com.cn/sch/search.do?searchType=1&yxmc={}"
 _INFO_URL = "https://gaokao.chsi.com.cn/wap/sch/schinfo/{}"
+_GAOKAO_INDEX_URL = "https://static-data.gaokao.cn/www/2.0/school/name.json"
 _SCHOOL_ID_RE = re.compile(r"schoolInfo--schId-(\d+)")
 _REFERENCE_ALIASES = {
     "中国人民大学(苏州校区)": "中国人民大学",
@@ -62,6 +63,31 @@ async def sync_reference_schools(conn: asyncpg.Connection, reference_path: Path)
         "resolved": len(resolved),
         "unresolved": len(pending) - len(resolved),
     }
+
+
+async def sync_gaokao_school_index(conn: asyncpg.Connection) -> dict[str, int]:
+    payload = await asyncio.to_thread(_fetch_json, _GAOKAO_INDEX_URL)
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    targets = [row for row in rows if isinstance(row, dict) and row.get("name")] if isinstance(rows, list) else []
+    existing = {
+        str(row["name"]).strip()
+        for row in await conn.fetch("SELECT name FROM schools")
+        if row["name"]
+    }
+    pending = [row for row in targets if str(row["name"]).strip() not in existing]
+    for row in pending:
+        name = str(row["name"]).strip()
+        await conn.execute(
+            """
+            INSERT INTO schools (sch_id, name, is_211, is_985, is_double_first,
+                is_private, is_independent, is_sino_foreign)
+            VALUES ($1, $2, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE)
+            ON CONFLICT (sch_id) DO NOTHING
+            """,
+            _safe_catalog_sch_id({"sch_id": int(row.get("school_id")), "name": name, "official_name": name}),
+            name,
+        )
+    return {"index_schools": len(targets), "already_present": len(targets) - len(pending), "added": len(pending)}
 
 
 def _read_reference_schools(path: Path) -> list[dict[str, str]]:

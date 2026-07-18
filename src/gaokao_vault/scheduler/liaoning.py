@@ -28,6 +28,10 @@ async def run_liaoning_profile(
     reference_path: Path | None = None,
 ) -> dict[str, dict[str, int]]:
     results: dict[str, dict[str, int]] = {}
+    from gaokao_vault.scheduler.reference_catalog import sync_gaokao_school_index
+
+    async with orchestrator.db_pool.acquire() as conn:
+        results["gaokao_school_index"] = await sync_gaokao_school_index(conn)
     if reference_path is not None:
         from gaokao_vault.scheduler.reference_catalog import sync_reference_schools
 
