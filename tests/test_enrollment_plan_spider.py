@@ -9,7 +9,7 @@ from scrapling.parser import Adaptor
 from scrapling.spiders import Request
 
 import gaokao_vault.spiders.enrollment_plan_spider as enrollment_plan_spider
-from gaokao_vault.config import DatabaseConfig
+from gaokao_vault.config import CrawlConfig, DatabaseConfig
 from gaokao_vault.spiders.enrollment_plan_spider import EnrollmentPlanSpider
 
 
@@ -344,7 +344,20 @@ def test_plan_api_retry_keeps_http_session_and_backs_off() -> None:
         retried = asyncio.run(spider.retry_blocked_request(request, response))
 
     assert retried.sid == "http"
-    sleep.assert_awaited_once_with(40.0)
+    sleep.assert_awaited_once_with(180.0)
+
+
+def test_enrollment_plan_spider_enforces_conservative_api_limits() -> None:
+    db_config = DatabaseConfig(dsn="postgresql://test:test@localhost:5432/test_db")
+    spider = EnrollmentPlanSpider(
+        db_config=db_config,
+        crawl_task_id=1,
+        config=CrawlConfig(concurrency=20, concurrency_per_domain=10, base_delay=0.1),
+    )
+
+    assert spider.concurrent_requests == 2
+    assert spider.concurrent_requests_per_domain == 1
+    assert spider.download_delay == 1.5
 
 
 def test_parse_school_name_index_yields_per_school_plan_dictionaries() -> None:

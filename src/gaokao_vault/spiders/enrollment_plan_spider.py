@@ -38,7 +38,7 @@ CHSI_DATA_SOURCE = "gaokao.chsi.com.cn"
 GAOKAO_STATIC_BASE_URL = "https://static-data.gaokao.cn"
 GAOKAO_WEB_ORIGIN = "https://www.gaokao.cn"
 PLAN_API_RATE_LIMIT_CODE = "1069"
-PLAN_API_BACKOFF_SECONDS = 20.0
+PLAN_API_BACKOFF_SECONDS = (60.0, 180.0, 540.0, 900.0)
 PLAN_API_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -113,6 +113,13 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
     download_delay = 0.2
     max_blocked_retries = 6
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.concurrent_requests = min(self.concurrent_requests, 2)
+        self.concurrent_requests_per_domain = 1
+        self.download_delay = max(self.download_delay, 1.5)
+        self._plan_api_cooldown_until = 0.0
+
     def configure_sessions(self, manager) -> None:
         manager.add(
             "http",
@@ -142,15 +149,19 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
     async def retry_blocked_request(self, request: Request, response: Response) -> Request:
         request.sid = "http"
         retry_count = max(request._retry_count, 1)
-        backoff = PLAN_API_BACKOFF_SECONDS * retry_count
+        backoff = PLAN_API_BACKOFF_SECONDS[min(retry_count - 1, len(PLAN_API_BACKOFF_SECONDS) - 1)]
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        self._plan_api_cooldown_until = max(self._plan_api_cooldown_until, now + backoff)
+        cooldown = self._plan_api_cooldown_until - now
         logger.warning(
             "招生计划 API 触发限流 url=%s status=%s retry=%d backoff=%.0fs",
             request.url,
             response.status,
             retry_count,
-            backoff,
+            cooldown,
         )
-        await asyncio.sleep(backoff)
+        await asyncio.sleep(cooldown)
         return request
 
     async def start_requests(self):
