@@ -28,7 +28,6 @@ async def sync_reference_schools(conn: asyncpg.Connection, reference_path: Path)
     targets = await asyncio.to_thread(_read_reference_schools, reference_path)
     existing_rows = await conn.fetch("SELECT name, sch_id FROM schools")
     existing = {str(row["name"]).strip() for row in existing_rows if row["name"]}
-    occupied_ids = {int(row["sch_id"]) for row in existing_rows}
     pending = [target for target in targets if target["name"] not in existing]
     results = await asyncio.gather(*(asyncio.to_thread(_resolve_school, target) for target in pending))
     resolved = [result for result in results if result is not None]
