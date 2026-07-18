@@ -119,6 +119,7 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         self.concurrent_requests_per_domain = 1
         self.download_delay = max(self.download_delay, 1.5)
         self._plan_api_cooldown_until = 0.0
+        self._consecutive_plan_api_limits = 0
 
     def configure_sessions(self, manager) -> None:
         manager.add(
@@ -141,6 +142,7 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
             if payload is not None:
                 code = str(payload.get("code", ""))
                 if code == "0000":
+                    self._consecutive_plan_api_limits = 0
                     return False
                 if code == PLAN_API_RATE_LIMIT_CODE:
                     return True
@@ -148,7 +150,8 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
 
     async def retry_blocked_request(self, request: Request, response: Response) -> Request:
         request.sid = "http"
-        retry_count = max(request._retry_count, 1)
+        self._consecutive_plan_api_limits += 1
+        retry_count = self._consecutive_plan_api_limits
         backoff = PLAN_API_BACKOFF_SECONDS[min(retry_count - 1, len(PLAN_API_BACKOFF_SECONDS) - 1)]
         loop = asyncio.get_running_loop()
         now = loop.time()

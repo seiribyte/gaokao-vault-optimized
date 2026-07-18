@@ -313,12 +313,14 @@ def test_configure_sessions_uses_browser_headers_for_plan_api() -> None:
 
 def test_plan_api_success_payload_is_not_blocked_by_content_text() -> None:
     spider = _make_spider()
+    spider._consecutive_plan_api_limits = 2
     response = _make_json_response(
         {"code": "0000", "message": "成功", "data": {"item": [{"remark": "系统繁忙专业方向"}]}},
         "https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school",
     )
 
     assert asyncio.run(spider.is_blocked(response)) is False
+    assert spider._consecutive_plan_api_limits == 0
 
 
 def test_plan_api_business_rate_limit_is_blocked() -> None:
@@ -334,7 +336,6 @@ def test_plan_api_business_rate_limit_is_blocked() -> None:
 def test_plan_api_retry_keeps_http_session_and_backs_off() -> None:
     spider = _make_spider()
     request = Request("https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school", sid="http")
-    request._retry_count = 2
     response = _make_json_response(
         {"code": "1069", "message": "请求受限", "data": None},
         request.url,
@@ -342,9 +343,10 @@ def test_plan_api_retry_keeps_http_session_and_backs_off() -> None:
 
     with patch("gaokao_vault.spiders.enrollment_plan_spider.asyncio.sleep", new=AsyncMock()) as sleep:
         retried = asyncio.run(spider.retry_blocked_request(request, response))
+        asyncio.run(spider.retry_blocked_request(request, response))
 
     assert retried.sid == "http"
-    sleep.assert_awaited_once_with(180.0)
+    assert [call.args[0] for call in sleep.await_args_list] == [60.0, 180.0]
 
 
 def test_enrollment_plan_spider_enforces_conservative_api_limits() -> None:
