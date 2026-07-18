@@ -184,6 +184,7 @@ def export_liaoning(
     plan_year: Annotated[int, typer.Option("--plan-year", help="招生计划年份")] = 2026,
     subject: Annotated[str, typer.Option("--subject", help="all、物理或历史")] = "all",
     output: Annotated[Path | None, typer.Option("--output", "-o", help="输出 XLSX 路径")] = None,
+    baseline: Annotated[Path | None, typer.Option("--baseline", help="保留历史数据的原版 XLSX")] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Export Liaoning plans with the previous four years of admission data."""
@@ -205,6 +206,7 @@ def export_liaoning(
                 output_path,
                 plan_year=plan_year,
                 subject=subject_filter,
+                baseline_path=baseline,
             )
         finally:
             await close_pool()
@@ -225,6 +227,7 @@ def crawl_liaoning(
     plan_year: Annotated[int, typer.Option("--plan-year", help="招生计划年份")] = 2026,
     subject: Annotated[str, typer.Option("--subject", help="all、物理或历史")] = "all",
     output: Annotated[Path | None, typer.Option("--output", "-o", help="输出 XLSX 路径")] = None,
+    baseline: Annotated[Path | None, typer.Option("--baseline", help="保留历史数据的原版 XLSX")] = None,
     refresh_catalog: Annotated[
         bool,
         typer.Option("--refresh-catalog/--reuse-catalog", help="重新抓取或复用学校、专业目录"),
@@ -268,6 +271,7 @@ def crawl_liaoning(
                 output_path,
                 plan_year=plan_year,
                 subject=subject_filter,
+                baseline_path=baseline,
             )
         finally:
             await close_pool()

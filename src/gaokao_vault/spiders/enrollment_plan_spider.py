@@ -276,7 +276,7 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
                 and province_code
                 and isinstance(items, list)
                 and num_found is not None
-                and page * 50 < num_found
+                and page * 20 < num_found
             ):
                 next_page = page + 1
                 yield Request(

@@ -523,3 +523,27 @@ def test_parse_gaokao_static_enrollment_plan_json() -> None:
     assert items[0]["data_source"] == "gaokao.cn"
     assert items[0]["source_url"] == "https://static-data.gaokao.cn/www/2.0/schoolspecialplan/118/2025/32.json"
     process_item.assert_awaited_once()
+
+
+def test_parse_plan_api_paginates_using_actual_page_size() -> None:
+    spider = _make_spider()
+    response = _make_json_response(
+        {"code": "0000", "data": {"numFound": 21, "item": []}},
+        "https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school&page=1&size=20",
+        {
+            "school_id": 1,
+            "school_name": "测试大学",
+            "gaokao_school_id": "118",
+            "province_id": 6,
+            "province_code": "21",
+            "year": 2026,
+            "page": 1,
+        },
+    )
+
+    with patch.object(spider, "_get_pool", new=AsyncMock(return_value=_FakePool(AsyncMock()))):
+        results = asyncio.run(_collect(spider.parse(response)))
+
+    assert len(results) == 1
+    assert results[0].meta["page"] == 2
+    assert "page=2&size=20" in results[0].url

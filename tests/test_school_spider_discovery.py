@@ -154,6 +154,25 @@ def test_start_requests_emits_only_warmup_and_search_entry():
     assert all(request.priority == BRUTE_FORCE_PRIORITY for request in requests[2:])
 
 
+def test_extract_tags_ignores_javascript_hidden_placeholders() -> None:
+    response = _make_response(
+        """
+        <div class="content-introduction">
+          <div class="yxtx">
+            <span class="syl" style="display: none;">“双一流”建设高校</span>
+            <span class="qjjh" style="display: inline-block;">强基计划</span>
+          </div>
+        </div>
+        """,
+        "https://gaokao.chsi.com.cn/sch/schoolInfoMain--schId-762.dhtml",
+    )
+    data: dict = {}
+
+    SchoolSpider._extract_tags(response, data)
+
+    assert data["is_double_first"] is False
+
+
 def test_parse_search_entry_yields_detail_requests_from_current_page():
     spider = _make_school_spider()
     response = _make_response(

@@ -304,8 +304,12 @@ class SchoolSpider(BaseGaokaoSpider):
 
     @staticmethod
     def _extract_tags(response: Response, data: dict) -> None:
-        tags_text = response.css("div.content-introduction span::text").getall()
-        tag_set = {t.strip() for t in tags_text}
+        tag_elements = response.css("div.content-introduction span")
+        tag_set = {
+            "".join(element.css("::text").getall()).strip()
+            for element in tag_elements
+            if "display: none" not in element.attrib.get("style", "").lower()
+        }
         data["is_211"] = "211" in tag_set
         data["is_985"] = "985" in tag_set
         data["is_double_first"] = any("双一流" in t for t in tag_set)

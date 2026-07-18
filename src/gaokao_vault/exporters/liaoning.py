@@ -13,7 +13,7 @@ from typing import Any
 from xml.etree import ElementTree
 
 import asyncpg
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, NamedStyle, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -119,6 +119,7 @@ async def export_liaoning_workbook(
     *,
     plan_year: int,
     subject: str | None = None,
+    baseline_path: Path | None = None,
 ) -> ExportSummary:
     history_years = history_years_for(plan_year)
     async with pool.acquire() as conn:
@@ -137,6 +138,13 @@ async def export_liaoning_workbook(
         charters,
         plan_year=plan_year,
     )
+    if baseline_path is not None:
+        baseline_rows = await asyncio.to_thread(load_liaoning_baseline_rows, baseline_path)
+        rows, matched_counts, new_count = merge_liaoning_baseline_rows(
+            rows,
+            baseline_rows,
+            plan_year=plan_year,
+        )
     await asyncio.to_thread(write_liaoning_workbook, output_path, rows, plan_year=plan_year)
     return ExportSummary(
         output_path=output_path,
@@ -165,13 +173,18 @@ def build_liaoning_export_rows(
 
     for plan in plans:
         matches: dict[int, dict[str, Any] | None] = {}
+        historical_plan_matches: dict[int, dict[str, Any] | None] = {}
         for year in history_years:
             match = _match_history_row(plan, year, admission_indexes)
             matches[year] = match
+            historical_plan_matches[year] = _match_history_row(plan, year, historical_plan_indexes)
             if match is not None:
                 matched_counts[year] += 1
 
-        is_new = all(match is None for match in matches.values())
+        is_new = all(
+            matches[year] is None and historical_plan_matches[year] is None
+            for year in history_years
+        )
         if is_new:
             new_count += 1
 
@@ -205,12 +218,10 @@ def build_liaoning_export_rows(
 
         for year in history_years:
             admission = matches[year]
-            historical_plan_count = None
-            if admission is not None:
-                historical_plan_count = admission.get("plan_count")
-                if historical_plan_count is None:
-                    historical_plan = _match_history_row(plan, year, historical_plan_indexes)
-                    historical_plan_count = historical_plan.get("plan_count") if historical_plan else None
+            historical_plan = historical_plan_matches[year]
+            historical_plan_count = admission.get("plan_count") if admission else None
+            if historical_plan_count is None and historical_plan is not None:
+                historical_plan_count = historical_plan.get("plan_count")
             row.extend([
                 admission.get("admitted_count") if admission else None,
                 admission.get("min_score") if admission else None,
@@ -252,6 +263,84 @@ def build_liaoning_export_rows(
         output_rows.append(row)
 
     return output_rows, matched_counts, new_count
+
+
+def load_liaoning_baseline_rows(path: Path) -> list[list[Any]]:
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    worksheet = workbook.active
+    rows: list[list[Any]] = []
+    try:
+        for values in worksheet.iter_rows(min_row=3, values_only=True):
+            row = list(values[:65])
+            if not any(value not in (None, "") for value in row):
+                continue
+            row.extend([None] * (65 - len(row)))
+            rows.append(row)
+    finally:
+        workbook.close()
+    return rows
+
+
+def merge_liaoning_baseline_rows(
+    generated_rows: Sequence[list[Any]],
+    baseline_rows: Sequence[list[Any]],
+    *,
+    plan_year: int,
+) -> tuple[list[list[Any]], dict[int, int], int]:
+    exact_index: dict[tuple[str, ...], list[int]] = defaultdict(list)
+    name_index: dict[tuple[str, ...], list[int]] = defaultdict(list)
+    for index, row in enumerate(baseline_rows):
+        exact_index[_export_row_key(row)].append(index)
+        name_index[_export_row_name_key(row)].append(index)
+
+    merged = [list(row) for row in baseline_rows]
+    consumed: set[int] = set()
+    for generated in generated_rows:
+        candidates = [index for index in exact_index.get(_export_row_key(generated), []) if index not in consumed]
+        if len(candidates) != 1:
+            candidates = [
+                index for index in name_index.get(_export_row_name_key(generated), []) if index not in consumed
+            ]
+        if len(candidates) == 1:
+            index = candidates[0]
+            consumed.add(index)
+            merged[index] = [*generated[:20], *merged[index][20:65]]
+        else:
+            merged.append(list(generated))
+
+    history_years = history_years_for(plan_year)
+    matched_counts = dict.fromkeys(history_years, 0)
+    new_count = 0
+    for row in merged:
+        has_history = False
+        for offset, year in enumerate(history_years):
+            block = row[20 + offset * 5 : 25 + offset * 5]
+            if any(value not in (None, "") for value in block):
+                matched_counts[year] += 1
+                has_history = True
+        row[19] = None if has_history else "新增"
+        new_count += not has_history
+    return merged, matched_counts, new_count
+
+
+def _export_row_key(row: Sequence[Any]) -> tuple[str, ...]:
+    return (
+        _normalized_code(row[6]),
+        _clean_text(row[7]),
+        _normalized_code(row[8]),
+        _normalized_full_major_name(row[9]),
+        _subject_label(row[4]),
+        _normalized_batch_text(row[3]),
+    )
+
+
+def _export_row_name_key(row: Sequence[Any]) -> tuple[str, ...]:
+    return (
+        _clean_text(row[7]),
+        _normalized_full_major_name(row[9]),
+        _subject_label(row[4]),
+        _normalized_batch_text(row[3]),
+    )
 
 
 def _build_history_indexes(

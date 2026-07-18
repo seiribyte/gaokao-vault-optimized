@@ -9,6 +9,7 @@ from openpyxl import load_workbook
 from gaokao_vault.exporters.liaoning import (
     build_liaoning_export_rows,
     history_years_for,
+    merge_liaoning_baseline_rows,
     write_liaoning_workbook,
 )
 
@@ -173,6 +174,88 @@ def test_name_fallback_only_applies_when_plan_major_id_is_missing_and_unambiguou
     assert rows[0][19] == "新增"
     assert matched_counts[2025] == 0
     assert new_count == 1
+
+
+def test_historical_plan_prevents_false_new_label_without_admission_result() -> None:
+    historical_plan = {
+        "school_id": 1,
+        "major_id": 10,
+        "major_name": "计算机科学与技术",
+        "canonical_major_name": "计算机科学与技术",
+        "year": 2025,
+        "subject_category": "物理类",
+        "batch": "本科批",
+        "batch_code": "regular",
+        "batch_category": "普通批",
+        "batch_segment": None,
+        "plan_count": 6,
+    }
+
+    rows, matched_counts, new_count = build_liaoning_export_rows(
+        [_plan()],
+        [],
+        [historical_plan],
+        [],
+        plan_year=2026,
+    )
+
+    assert rows[0][19] is None
+    assert rows[0][24] == 6
+    assert matched_counts[2025] == 0
+    assert new_count == 0
+
+
+def test_merge_baseline_preserves_history_and_unseen_rows() -> None:
+    generated_rows, _, _ = build_liaoning_export_rows(
+        [_plan(plan_count=8)],
+        [],
+        [],
+        [],
+        plan_year=2026,
+    )
+    matched_baseline = list(generated_rows[0])
+    matched_baseline[14] = 5
+    matched_baseline[19] = None
+    matched_baseline[20:25] = [4, 620, 3000, "本科批", 5]
+    unseen_baseline = list(matched_baseline)
+    unseen_baseline[0] = "999"
+    unseen_baseline[7] = "未抓到大学"
+    unseen_baseline[9] = "历史学"
+    unseen_baseline[10] = "历史学"
+
+    rows, matched_counts, new_count = merge_liaoning_baseline_rows(
+        generated_rows,
+        [matched_baseline, unseen_baseline],
+        plan_year=2026,
+    )
+
+    assert len(rows) == 2
+    assert rows[0][14] == 8
+    assert rows[0][20:25] == [4, 620, 3000, "本科批", 5]
+    assert rows[0][19] is None
+    assert rows[1][7] == "未抓到大学"
+    assert matched_counts[2025] == 2
+    assert new_count == 0
+
+
+def test_merge_baseline_matches_unique_name_when_source_codes_differ() -> None:
+    generated_rows, _, _ = build_liaoning_export_rows(
+        [_plan(school_code_raw=None, major_code_raw="080901")],
+        [],
+        [],
+        [],
+        plan_year=2026,
+    )
+    baseline = list(generated_rows[0])
+    baseline[6] = "0001"
+    baseline[8] = "48"
+    baseline[20:25] = [4, 620, 3000, "本科批", 5]
+
+    rows, _, _ = merge_liaoning_baseline_rows(generated_rows, [baseline], plan_year=2026)
+
+    assert len(rows) == 1
+    assert rows[0][8] == "080901"
+    assert rows[0][20:25] == [4, 620, 3000, "本科批", 5]
 
 
 def test_write_liaoning_workbook_matches_attachment_structure(tmp_path: Path) -> None:
