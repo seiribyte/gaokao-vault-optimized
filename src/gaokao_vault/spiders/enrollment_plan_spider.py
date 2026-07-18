@@ -207,17 +207,36 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
                 logger.debug("Skipping enrollment plan for unmatched school=%s", school_name)
                 continue
 
-            yield Request(
-                PLAN_DICTIONARY_URL_TEMPLATE.format(school_id=gaokao_school_id),
-                callback=self.parse_plan_dictionary,
-                meta={
-                    "school_id": school["id"],
-                    "school_name": school_name,
-                    "gaokao_school_id": gaokao_school_id,
-                    "provinces": provinces,
-                    "years": years,
-                },
-            )
+            base_meta = {
+                "school_id": school["id"],
+                "school_name": school_name,
+                "gaokao_school_id": gaokao_school_id,
+                "provinces": provinces,
+                "years": years,
+            }
+            if len(years) == 1:
+                for province in provinces:
+                    yield Request(
+                        PLAN_URL_TEMPLATE.format(
+                            school_id=gaokao_school_id,
+                            year=years[0],
+                            province=province["code"],
+                        ),
+                        callback=self.parse,
+                        meta={
+                            **base_meta,
+                            "province_id": province["id"],
+                            "province_code": province["code"],
+                            "year": years[0],
+                            "page": 1,
+                        },
+                    )
+            else:
+                yield Request(
+                    PLAN_DICTIONARY_URL_TEMPLATE.format(school_id=gaokao_school_id),
+                    callback=self.parse_plan_dictionary,
+                    meta=base_meta,
+                )
 
     async def parse_plan_dictionary(self, response: Response):
         if response.status == 404 or response.request is None:
