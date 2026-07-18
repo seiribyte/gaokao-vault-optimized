@@ -120,6 +120,7 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         self.download_delay = max(self.download_delay, 1.5)
         self._plan_api_cooldown_until = 0.0
         self._consecutive_plan_api_limits = 0
+        self._plan_api_backoff_lock = asyncio.Lock()
 
     def configure_sessions(self, manager) -> None:
         manager.add(
@@ -150,21 +151,22 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
 
     async def retry_blocked_request(self, request: Request, response: Response) -> Request:
         request.sid = "http"
-        self._consecutive_plan_api_limits += 1
-        retry_count = self._consecutive_plan_api_limits
-        backoff = PLAN_API_BACKOFF_SECONDS[min(retry_count - 1, len(PLAN_API_BACKOFF_SECONDS) - 1)]
-        loop = asyncio.get_running_loop()
-        now = loop.time()
-        self._plan_api_cooldown_until = max(self._plan_api_cooldown_until, now + backoff)
-        cooldown = self._plan_api_cooldown_until - now
-        logger.warning(
-            "招生计划 API 触发限流 url=%s status=%s retry=%d backoff=%.0fs",
-            request.url,
-            response.status,
-            retry_count,
-            cooldown,
-        )
-        await asyncio.sleep(cooldown)
+        async with self._plan_api_backoff_lock:
+            self._consecutive_plan_api_limits += 1
+            retry_count = self._consecutive_plan_api_limits
+            backoff = PLAN_API_BACKOFF_SECONDS[min(retry_count - 1, len(PLAN_API_BACKOFF_SECONDS) - 1)]
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            self._plan_api_cooldown_until = max(self._plan_api_cooldown_until, now + backoff)
+            cooldown = self._plan_api_cooldown_until - now
+            logger.warning(
+                "招生计划 API 触发限流 url=%s status=%s retry=%d backoff=%.0fs",
+                request.url,
+                response.status,
+                retry_count,
+                cooldown,
+            )
+            await asyncio.sleep(cooldown)
         return request
 
     async def start_requests(self):

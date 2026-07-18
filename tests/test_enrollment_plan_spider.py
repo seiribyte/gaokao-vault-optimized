@@ -349,6 +349,22 @@ def test_plan_api_retry_keeps_http_session_and_backs_off() -> None:
     assert [call.args[0] for call in sleep.await_args_list] == [60.0, 180.0]
 
 
+def test_plan_api_retry_serializes_concurrent_backoff_state() -> None:
+    spider = _make_spider()
+    response = _make_json_response(
+        {"code": "1069", "message": "请求受限", "data": None},
+        "https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school",
+    )
+    requests = [Request(response.url, sid="http") for _ in range(2)]
+
+    async def run() -> None:
+        with patch("gaokao_vault.spiders.enrollment_plan_spider.asyncio.sleep", new=AsyncMock()) as sleep:
+            await asyncio.gather(*(spider.retry_blocked_request(request, response) for request in requests))
+            assert [call.args[0] for call in sleep.await_args_list] == [60.0, 180.0]
+
+    asyncio.run(run())
+
+
 def test_enrollment_plan_spider_enforces_conservative_api_limits() -> None:
     db_config = DatabaseConfig(dsn="postgresql://test:test@localhost:5432/test_db")
     spider = EnrollmentPlanSpider(
