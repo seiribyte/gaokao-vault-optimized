@@ -26,11 +26,9 @@ _REFERENCE_ALIASES = {
 
 async def sync_reference_schools(conn: asyncpg.Connection, reference_path: Path) -> dict[str, int]:
     targets = await asyncio.to_thread(_read_reference_schools, reference_path)
-    existing = {
-        str(row["name"]).strip()
-        for row in await conn.fetch("SELECT name FROM schools")
-        if row["name"]
-    }
+    existing_rows = await conn.fetch("SELECT name, sch_id FROM schools")
+    existing = {str(row["name"]).strip() for row in existing_rows if row["name"]}
+    occupied_ids = {int(row["sch_id"]) for row in existing_rows}
     pending = [target for target in targets if target["name"] not in existing]
     results = await asyncio.gather(*(asyncio.to_thread(_resolve_school, target) for target in pending))
     resolved = [result for result in results if result is not None]
@@ -69,14 +67,13 @@ async def sync_gaokao_school_index(conn: asyncpg.Connection) -> dict[str, int]:
     payload = await asyncio.to_thread(_fetch_json, _GAOKAO_INDEX_URL)
     rows = payload.get("data") if isinstance(payload, dict) else None
     targets = [row for row in rows if isinstance(row, dict) and row.get("name")] if isinstance(rows, list) else []
-    existing = {
-        str(row["name"]).strip()
-        for row in await conn.fetch("SELECT name FROM schools")
-        if row["name"]
-    }
+    existing_rows = await conn.fetch("SELECT name, sch_id FROM schools")
+    existing = {str(row["name"]).strip() for row in existing_rows if row["name"]}
+    occupied_ids = {int(row["sch_id"]) for row in existing_rows}
     pending = [row for row in targets if str(row["name"]).strip() not in existing]
     for row in pending:
         name = str(row["name"]).strip()
+        sch_id = _allocate_catalog_sch_id(int(row.get("school_id")), name, occupied_ids)
         await conn.execute(
             """
             INSERT INTO schools (sch_id, name, is_211, is_985, is_double_first,
@@ -84,9 +81,11 @@ async def sync_gaokao_school_index(conn: asyncpg.Connection) -> dict[str, int]:
             VALUES ($1, $2, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE)
             ON CONFLICT (sch_id) DO NOTHING
             """,
-            _safe_catalog_sch_id({"sch_id": int(row.get("school_id")), "name": name, "official_name": name}),
+            sch_id,
             name,
         )
+        occupied_ids.add(sch_id)
+        existing.add(name)
     return {"index_schools": len(targets), "already_present": len(targets) - len(pending), "added": len(pending)}
 
 
@@ -138,7 +137,20 @@ def _safe_catalog_sch_id(school: dict[str, object]) -> int:
     sch_id = int(cast(int, school["sch_id"]))
     if sch_id <= 2_147_483_647 and school.get("official_name") == school.get("name"):
         return sch_id
-    digest = hashlib.sha256(str(school["name"]).encode("utf-8")).digest()
+    return _synthetic_catalog_sch_id(str(school["name"]))
+
+
+def _allocate_catalog_sch_id(source_id: int, name: str, occupied_ids: set[int]) -> int:
+    if source_id <= 2_147_483_647 and source_id not in occupied_ids:
+        return source_id
+    candidate = _synthetic_catalog_sch_id(name)
+    while candidate in occupied_ids:
+        candidate -= 1
+    return candidate
+
+
+def _synthetic_catalog_sch_id(name: str) -> int:
+    digest = hashlib.sha256(name.encode("utf-8")).digest()
     return -(int.from_bytes(digest[:4], "big") % 2_000_000_000 + 1)
 
 

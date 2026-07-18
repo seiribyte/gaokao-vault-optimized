@@ -5,7 +5,11 @@ from unittest.mock import patch
 
 from openpyxl import Workbook
 
-from gaokao_vault.scheduler.reference_catalog import _read_reference_schools, _resolve_school
+from gaokao_vault.scheduler.reference_catalog import (
+    _allocate_catalog_sch_id,
+    _read_reference_schools,
+    _resolve_school,
+)
 
 
 def test_read_reference_schools_deduplicates_names(tmp_path: Path) -> None:
@@ -47,3 +51,13 @@ def test_resolve_school_requires_exact_official_name() -> None:
     assert school["sch_id"] == 402800
     assert school["name"] == "三亚学院"
     assert school["city"] == "三亚"
+
+
+def test_catalog_id_collision_uses_stable_negative_id() -> None:
+    occupied = {2131}
+
+    allocated = _allocate_catalog_sch_id(2131, "菏泽家政职业学院", occupied)
+
+    assert allocated < 0
+    assert allocated not in occupied
+    assert allocated == _allocate_catalog_sch_id(2131, "菏泽家政职业学院", occupied)
