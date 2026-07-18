@@ -383,10 +383,9 @@ def test_parse_school_name_index_yields_per_school_plan_dictionaries() -> None:
     requests = asyncio.run(_collect(spider.parse_school_name_index(response)))
 
     assert len(requests) == 1
-    assert requests[0].url.startswith("https://api.zjzw.cn/web/api?")
-    assert requests[0].callback == spider.parse
-    assert requests[0].meta["province_code"] == "32"
-    assert requests[0].meta["year"] == 2025
+    assert requests[0].url == "https://static-data.gaokao.cn/www/2.0/school/118/dic/specialplan.json"
+    assert requests[0].callback == spider.parse_plan_dictionary
+    assert requests[0].meta["years"] == [2025]
 
 
 def test_school_name_index_supports_reference_aliases_and_military_prefixes() -> None:
@@ -481,6 +480,25 @@ def test_parse_plan_dictionary_normalizes_dirty_requested_years() -> None:
     assert len(requests) == 1
     assert requests[0].url.startswith("https://api.zjzw.cn/web/api?")
     assert [request.meta["year"] for request in requests] == [2025]
+
+
+def test_parse_plan_dictionary_skips_province_missing_from_valid_dictionary() -> None:
+    spider = _make_spider()
+    response = _make_json_response(
+        {"code": "0000", "data": {"year": {"32": [2026]}}},
+        "https://static-data.gaokao.cn/www/2.0/school/118/dic/specialplan.json",
+        {
+            "school_id": 1,
+            "school_name": "苏州大学",
+            "gaokao_school_id": "118",
+            "provinces": [{"id": 6, "name": "辽宁", "code": "21"}],
+            "years": [2026],
+        },
+    )
+
+    requests = asyncio.run(_collect(spider.parse_plan_dictionary(response)))
+
+    assert requests == []
 
 
 def test_parse_gaokao_static_enrollment_plan_json() -> None:
