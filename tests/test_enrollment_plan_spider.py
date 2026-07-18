@@ -317,7 +317,7 @@ def test_parse_school_name_index_yields_per_school_plan_dictionaries() -> None:
     requests = asyncio.run(_collect(spider.parse_school_name_index(response)))
 
     assert len(requests) == 1
-    assert requests[0].url == "https://static-data.gaokao.cn/www/2.0/yk/school/118/dic/specialplan.json"
+    assert requests[0].url == "https://static-data.gaokao.cn/www/2.0/school/118/dic/specialplan.json"
     assert requests[0].callback == spider.parse_plan_dictionary
     assert requests[0].meta == {
         "school_id": 1,
@@ -364,26 +364,15 @@ def test_parse_plan_dictionary_yields_requested_years_even_when_dictionary_is_in
 
     requests = asyncio.run(_collect(spider.parse_plan_dictionary(response)))
 
-    assert [request.url for request in requests] == [
-        "https://static-data.gaokao.cn/www/2.0/schoolspecialplan/118/2023/32.json",
-        "https://static-data.gaokao.cn/www/2.0/schoolspecialplan/118/2024/32.json",
-        "https://static-data.gaokao.cn/www/2.0/schoolspecialplan/118/2025/32.json",
-        "https://static-data.gaokao.cn/www/2.0/schoolspecialplan/118/2023/11.json",
-        "https://static-data.gaokao.cn/www/2.0/schoolspecialplan/118/2024/11.json",
-        "https://static-data.gaokao.cn/www/2.0/schoolspecialplan/118/2025/11.json",
-    ]
+    assert [request.meta["year"] for request in requests] == [2024, 2025, 2024]
+    assert [request.meta["province_code"] for request in requests] == ["32", "32", "11"]
+    assert all(request.url.startswith("https://api.zjzw.cn/web/api?") for request in requests)
     assert requests[0].meta["province_code"] == "32"
-    assert requests[0].meta["year"] == 2023
+    assert requests[0].meta["year"] == 2024
     assert requests[1].meta["province_code"] == "32"
-    assert requests[1].meta["year"] == 2024
-    assert requests[2].meta["province_code"] == "32"
-    assert requests[2].meta["year"] == 2025
-    assert requests[3].meta["province_code"] == "11"
-    assert requests[3].meta["year"] == 2023
-    assert requests[4].meta["province_code"] == "11"
-    assert requests[4].meta["year"] == 2024
-    assert requests[5].meta["province_code"] == "11"
-    assert requests[5].meta["year"] == 2025
+    assert requests[1].meta["year"] == 2025
+    assert requests[2].meta["province_code"] == "11"
+    assert requests[2].meta["year"] == 2024
 
 
 def test_parse_plan_dictionary_normalizes_dirty_requested_years() -> None:
@@ -402,11 +391,9 @@ def test_parse_plan_dictionary_normalizes_dirty_requested_years() -> None:
 
     requests = asyncio.run(_collect(spider.parse_plan_dictionary(response)))
 
-    assert [request.url for request in requests] == [
-        "https://static-data.gaokao.cn/www/2.0/schoolspecialplan/118/2025/32.json",
-        "https://static-data.gaokao.cn/www/2.0/schoolspecialplan/118/2024/32.json",
-    ]
-    assert [request.meta["year"] for request in requests] == [2025, 2024]
+    assert len(requests) == 1
+    assert requests[0].url.startswith("https://api.zjzw.cn/web/api?")
+    assert [request.meta["year"] for request in requests] == [2025]
 
 
 def test_parse_gaokao_static_enrollment_plan_json() -> None:
@@ -420,6 +407,7 @@ def test_parse_gaokao_static_enrollment_plan_json() -> None:
                     "item": [
                         {
                             "school_id": "118",
+                            "school_code": "0001",
                             "special_id": "5647",
                             "type": "2074",
                             "batch": "14",
@@ -467,6 +455,7 @@ def test_parse_gaokao_static_enrollment_plan_json() -> None:
 
     assert len(items) == 1
     assert items[0]["school_id"] == 1
+    assert items[0]["school_code_raw"] == "0001"
     assert items[0]["province_id"] == 7
     assert items[0]["year"] == 2025
     assert items[0]["subject_category_id"] == 4

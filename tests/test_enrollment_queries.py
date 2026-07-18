@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any, cast
 
 from gaokao_vault.db.queries.enrollment import upsert_enrollment_plan, upsert_provincial_announcement
@@ -26,6 +27,7 @@ def test_upsert_enrollment_plan_preserves_rule_and_quality_fields() -> None:
             cast(Any, conn),
             {
                 "school_id": 1,
+                "school_code_raw": "0001",
                 "province_id": 7,
                 "year": 2025,
                 "subject_category_id": 3,
@@ -56,6 +58,8 @@ def test_upsert_enrollment_plan_preserves_rule_and_quality_fields() -> None:
 
     assert plan_id == 77
     assert "enrollment_plans" in conn.query
+    assert "school_code_raw" in conn.query
+    assert "0001" in conn.args
     assert "major_group_code" in conn.query
     assert "selection_requirement" in conn.query
     assert "batch_code" in conn.query
@@ -73,6 +77,8 @@ def test_upsert_enrollment_plan_preserves_rule_and_quality_fields() -> None:
     assert "物理+化学" in conn.args
     assert "https://gaokao.chsi.com.cn/test-plan" in conn.args
     assert json.dumps([], ensure_ascii=False) in conn.args
+    assert len(conn.args) == 34
+    assert max(int(value) for value in re.findall(r"\$(\d+)", conn.query)) == len(conn.args)
 
 
 def test_upsert_provincial_announcement_persists_official_source_fields() -> None:

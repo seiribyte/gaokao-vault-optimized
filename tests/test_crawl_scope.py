@@ -49,6 +49,18 @@ def test_iter_crawl_years_keeps_incremental_inside_full_window() -> None:
     assert list(iter_crawl_years(mode="incremental", full_start_year=2025, current_year=2026)) == [2025, 2026]
 
 
+def test_iter_crawl_years_intersects_explicit_target_window() -> None:
+    assert list(
+        iter_crawl_years(
+            mode="full",
+            full_start_year=2020,
+            current_year=2026,
+            target_start_year=2022,
+            target_end_year=2025,
+        )
+    ) == [2022, 2023, 2024, 2025]
+
+
 def test_load_province_targets_uses_seeded_province_codes_for_remote_urls() -> None:
     conn = AsyncMock()
     conn.fetch = AsyncMock(
@@ -62,3 +74,19 @@ def test_load_province_targets_uses_seeded_province_codes_for_remote_urls() -> N
 
     assert [(p.id, p.name, p.url_value) for p in targets] == [(7, "吉林", "22"), (10, "江苏", "32")]
     conn.fetch.assert_awaited_once()
+
+
+def test_load_province_targets_filters_by_name_or_code() -> None:
+    conn = AsyncMock()
+    conn.fetch = AsyncMock(
+        return_value=[
+            {"id": 6, "name": "辽宁", "code": "21"},
+            {"id": 7, "name": "吉林", "code": "22"},
+        ]
+    )
+
+    by_name = asyncio.run(load_province_targets(_FakePool(conn), ["辽宁"]))
+    by_code = asyncio.run(load_province_targets(_FakePool(conn), ["21"]))
+
+    assert [(target.name, target.url_value) for target in by_name] == [("辽宁", "21")]
+    assert [(target.name, target.url_value) for target in by_code] == [("辽宁", "21")]

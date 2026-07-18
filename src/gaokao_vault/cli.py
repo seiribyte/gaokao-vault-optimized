@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -160,6 +161,126 @@ def status(
             await close_pool()
 
     asyncio.run(_run())
+
+
+def _liaoning_subject(value: str) -> str | None:
+    normalized = value.strip().removesuffix("类")
+    if normalized in {"", "all", "全部"}:
+        return None
+    if normalized not in {"物理", "历史"}:
+        msg = "--subject 只支持 all、物理或历史"
+        raise typer.BadParameter(msg)
+    return normalized
+
+
+def _liaoning_output_path(output: Path | None, *, plan_year: int, crawl_dir: str) -> Path:
+    if output is not None:
+        return output
+    return Path(crawl_dir) / f"辽宁-{plan_year}数据({plan_year - 4}-{plan_year}).xlsx"
+
+
+@app.command()
+def export_liaoning(
+    plan_year: Annotated[int, typer.Option("--plan-year", help="招生计划年份")] = 2026,
+    subject: Annotated[str, typer.Option("--subject", help="all、物理或历史")] = "all",
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="输出 XLSX 路径")] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+) -> None:
+    """Export Liaoning plans with the previous four years of admission data."""
+    from gaokao_vault.config import AppConfig
+
+    config = AppConfig()
+    _setup_logging(verbose, log_dir=config.crawl.log_dir)
+    subject_filter = _liaoning_subject(subject)
+    output_path = _liaoning_output_path(output, plan_year=plan_year, crawl_dir=config.crawl.crawl_dir)
+
+    async def _run():
+        from gaokao_vault.db.connection import close_pool, create_pool
+        from gaokao_vault.exporters.liaoning import export_liaoning_workbook
+
+        pool = await create_pool(config.db)
+        try:
+            return await export_liaoning_workbook(
+                pool,
+                output_path,
+                plan_year=plan_year,
+                subject=subject_filter,
+            )
+        finally:
+            await close_pool()
+
+    try:
+        summary = asyncio.run(_run())
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        f"辽宁数据已导出: {summary.output_path} rows={summary.row_count} "
+        f"new={summary.new_plan_count} history={summary.matched_history_counts}"
+    )
+
+
+@app.command()
+def crawl_liaoning(
+    plan_year: Annotated[int, typer.Option("--plan-year", help="招生计划年份")] = 2026,
+    subject: Annotated[str, typer.Option("--subject", help="all、物理或历史")] = "all",
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="输出 XLSX 路径")] = None,
+    refresh_catalog: Annotated[
+        bool,
+        typer.Option("--refresh-catalog/--reuse-catalog", help="重新抓取或复用学校、专业目录"),
+    ] = True,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+) -> None:
+    """Crawl the Liaoning candidate profile and export an Excel workbook."""
+    from gaokao_vault.config import AppConfig
+
+    config = AppConfig()
+    scoped_crawl = config.crawl.model_copy(
+        update={
+            "target_provinces": ["辽宁"],
+            "target_year_start": plan_year - 4,
+            "target_year_end": plan_year,
+        }
+    )
+    scoped_config = config.model_copy(update={"crawl": scoped_crawl})
+    _setup_logging(verbose, log_dir=scoped_crawl.log_dir)
+    subject_filter = _liaoning_subject(subject)
+    output_path = _liaoning_output_path(output, plan_year=plan_year, crawl_dir=scoped_crawl.crawl_dir)
+
+    async def _run():
+        from gaokao_vault.db.connection import close_pool, create_pool
+        from gaokao_vault.exporters.liaoning import export_liaoning_workbook
+        from gaokao_vault.scheduler.liaoning import run_liaoning_profile
+        from gaokao_vault.scheduler.orchestrator import Orchestrator
+
+        pool = await create_pool(config.db)
+        try:
+            orchestrator = Orchestrator(
+                db_pool=pool,
+                config=scoped_crawl,
+                mode="full",
+                db_config=config.db,
+                app_config=scoped_config,
+            )
+            await run_liaoning_profile(orchestrator, refresh_catalog=refresh_catalog)
+            return await export_liaoning_workbook(
+                pool,
+                output_path,
+                plan_year=plan_year,
+                subject=subject_filter,
+            )
+        finally:
+            await close_pool()
+
+    try:
+        summary = asyncio.run(_run())
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        f"辽宁专项抓取与导出完成: {summary.output_path} rows={summary.row_count} "
+        f"new={summary.new_plan_count} history={summary.matched_history_counts}"
+    )
 
 
 @app.command()

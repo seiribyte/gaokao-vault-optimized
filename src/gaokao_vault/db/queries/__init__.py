@@ -6,6 +6,12 @@ from gaokao_vault.db.queries.enrollment import (
     upsert_provincial_announcement,
     upsert_timeline,
 )
+from gaokao_vault.db.queries.liaoning import (
+    fetch_liaoning_export_admissions,
+    fetch_liaoning_export_plans,
+    fetch_liaoning_historical_plans,
+    fetch_liaoning_school_charters,
+)
 from gaokao_vault.db.queries.majors import (
     refresh_school_major_strength_rollup,
     upsert_major,
@@ -29,6 +35,10 @@ from gaokao_vault.db.queries.special import upsert_special_enrollment
 __all__ = [
     "batch_upsert_score_segments",
     "create_task",
+    "fetch_liaoning_export_admissions",
+    "fetch_liaoning_export_plans",
+    "fetch_liaoning_historical_plans",
+    "fetch_liaoning_school_charters",
     "find_candidate_admission_chain",
     "find_latest_hash",
     "find_school_by_sch_id",

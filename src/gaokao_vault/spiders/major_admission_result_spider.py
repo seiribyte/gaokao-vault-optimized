@@ -168,8 +168,14 @@ class MajorAdmissionResultSpider(BaseGaokaoSpider):
         async with pool.acquire() as conn:
             rows = await conn.fetch("SELECT id, sch_id FROM schools ORDER BY id")
 
-        provinces = await load_province_targets(pool)
-        years = iter_crawl_years(mode=self.mode, full_start_year=_YEAR_START, current_year=_YEAR_END)
+        provinces = await load_province_targets(pool, self._crawl_config.target_provinces)
+        years = iter_crawl_years(
+            mode=self.mode,
+            full_start_year=_YEAR_START,
+            current_year=_YEAR_END,
+            target_start_year=self._crawl_config.target_year_start,
+            target_end_year=self._crawl_config.target_year_end,
+        )
 
         for row in rows:
             for province in provinces:

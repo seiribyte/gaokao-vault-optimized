@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class EnrollmentPlanItem(BaseModel):
     school_id: int
+    school_code_raw: str | None = None
     province_id: int
     year: int = Field(ge=2000, le=2100)
     subject_category_id: int | None = None

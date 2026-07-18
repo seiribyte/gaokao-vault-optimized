@@ -152,11 +152,22 @@ class DxsbbAdmissionResultSpider(BaseGaokaoSpider):
         major_name = _cell_text(cells, _column_index(header_map, ("专业名称", "专业")))
         if year is None or not major_name:
             return None
+        if self._crawl_config.target_year_start is not None and year < self._crawl_config.target_year_start:
+            return None
+        if self._crawl_config.target_year_end is not None and year > self._crawl_config.target_year_end:
+            return None
 
         province_id = provinces.get(_normalize_province_name(province_name)) if province_name else None
         if province_id is None:
             province_id = _infer_province_id(table_context, provinces)
         if province_id is None:
+            return None
+        target_names = {
+            _normalize_province_name(value)
+            for value in self._crawl_config.target_provinces
+            if not str(value).strip().isdigit()
+        }
+        if target_names and province_id not in {provinces.get(name) for name in target_names}:
             return None
 
         major_id = await find_school_major_id_by_name(

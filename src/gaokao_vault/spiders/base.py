@@ -53,13 +53,14 @@ class BaseGaokaoSpider(Spider):
         app_config: AppConfig | None = None,
         **kwargs,
     ):
+        self._crawl_config = config or CrawlConfig()
         # Set _rs_wait_ms BEFORE super().__init__() because it calls
         # configure_sessions() which reads self._rs_wait_ms.
         self._rs_wait_ms = 10000  # default RS wait
         self._browser_timeout_ms = 120000  # default browser navigation timeout
         if config:
-            self._rs_wait_ms = config.rs_wait_ms
-            self._browser_timeout_ms = config.browser_timeout_ms
+            self._rs_wait_ms = self._crawl_config.rs_wait_ms
+            self._browser_timeout_ms = self._crawl_config.browser_timeout_ms
 
         super().__init__(**kwargs)
         self._db_config = db_config
@@ -69,13 +70,13 @@ class BaseGaokaoSpider(Spider):
         self._stats: dict[str, int] = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
         self._subject_category_map: dict[str, int] | None = None
         self._last_heartbeat: float = time.monotonic()
-        self._heartbeat_interval: int = config.heartbeat_interval if config else 120
+        self._heartbeat_interval: int = self._crawl_config.heartbeat_interval
         self._items_since_heartbeat: int = 0
 
         if config:
-            self.concurrent_requests = config.concurrency
-            self.concurrent_requests_per_domain = config.concurrency_per_domain
-            self.download_delay = config.base_delay
+            self.concurrent_requests = self._crawl_config.concurrency
+            self.concurrent_requests_per_domain = self._crawl_config.concurrency_per_domain
+            self.download_delay = self._crawl_config.base_delay
 
     async def _get_pool(self) -> asyncpg.Pool:
         """Lazily create a local asyncpg pool bound to the current event loop."""

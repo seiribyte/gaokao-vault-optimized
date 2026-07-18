@@ -90,8 +90,19 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
         return await batch_upsert_score_segments(conn, rows)
 
     async def start_requests(self):
-        provinces = await load_province_targets(await self._get_pool())
-        years = list(iter_crawl_years(mode=self.mode, full_start_year=YEAR_START, current_year=YEAR_END))
+        provinces = await load_province_targets(
+            await self._get_pool(),
+            self._crawl_config.target_provinces,
+        )
+        years = list(
+            iter_crawl_years(
+                mode=self.mode,
+                full_start_year=YEAR_START,
+                current_year=YEAR_END,
+                target_start_year=self._crawl_config.target_year_start,
+                target_end_year=self._crawl_config.target_year_end,
+            )
+        )
         province_meta = [
             {"id": province.id, "name": province.name, "code": province.url_value} for province in provinces
         ]

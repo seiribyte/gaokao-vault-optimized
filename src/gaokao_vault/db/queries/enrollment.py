@@ -8,7 +8,7 @@ import asyncpg
 async def upsert_enrollment_plan(conn: asyncpg.Connection, data: dict) -> int:
     row = await conn.fetchrow(
         """
-        INSERT INTO enrollment_plans (school_id, province_id, year, subject_category_id,
+        INSERT INTO enrollment_plans (school_id, school_code_raw, province_id, year, subject_category_id,
             batch, batch_code, batch_category, batch_segment, major_name, major_id, plan_count, duration, tuition, note,
             major_group_code, major_code_raw, campus, education_location,
             selection_requirement, physical_exam_limit, single_subject_limit,
@@ -16,8 +16,9 @@ async def upsert_enrollment_plan(conn: asyncpg.Connection, data: dict) -> int:
             physical_exam_or_political_review, political_review_requirement, service_obligation,
             data_source, source_url, source_updated_at, quality_flags,
             content_hash, crawl_task_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)
         ON CONFLICT (school_id, province_id, year, subject_category_id, batch, major_name) DO UPDATE SET
+            school_code_raw = EXCLUDED.school_code_raw,
             batch_code = EXCLUDED.batch_code,
             batch_category = EXCLUDED.batch_category,
             batch_segment = EXCLUDED.batch_segment,
@@ -48,6 +49,7 @@ async def upsert_enrollment_plan(conn: asyncpg.Connection, data: dict) -> int:
         RETURNING id
         """,
         data["school_id"],
+        data.get("school_code_raw"),
         data["province_id"],
         data["year"],
         data.get("subject_category_id"),

@@ -27,6 +27,7 @@ dependencies = [
     "fake-useragent>=2.0",
     "openai>=1.0",
     "boto3>=1.35",
+    "openpyxl>=3.1",
 ]
 
 [project.scripts]
@@ -70,7 +71,7 @@ testpaths = ["tests"]
 target-version = "py310"
 line-length = 120
 fix = true
-exclude = ["skills/scrapling-official"]
+exclude = [".venv", "skills/scrapling-official"]
 
 [tool.ruff.lint]
 select = [

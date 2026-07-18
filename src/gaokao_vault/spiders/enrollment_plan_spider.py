@@ -36,8 +36,19 @@ DATA_SOURCE = "gaokao.cn"
 CHSI_DATA_SOURCE = "gaokao.chsi.com.cn"
 GAOKAO_STATIC_BASE_URL = "https://static-data.gaokao.cn"
 SCHOOL_NAME_INDEX_URL = f"{GAOKAO_STATIC_BASE_URL}/www/2.0/school/name.json"
-PLAN_DICTIONARY_URL_TEMPLATE = f"{GAOKAO_STATIC_BASE_URL}/www/2.0/yk/school/{{school_id}}/dic/specialplan.json"
-PLAN_URL_TEMPLATE = f"{GAOKAO_STATIC_BASE_URL}/www/2.0/schoolspecialplan/{{school_id}}/{{year}}/{{province}}.json"
+# Correct dictionary path (legacy /yk/school/... is 404).
+PLAN_DICTIONARY_URL_TEMPLATE = f"{GAOKAO_STATIC_BASE_URL}/www/2.0/school/{{school_id}}/dic/specialplan.json"
+# Static plan JSON keys are currently 404; zjzw API is the live data source.
+PLAN_URL_TEMPLATE = (
+    "https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school"
+    "&school_id={school_id}&year={year}&local_province_id={province}"
+    "&page=1&size=20&special_group=&local_batch_id=&local_type_id=&keyword="
+)
+PLAN_API_PAGE_URL_TEMPLATE = (
+    "https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school"
+    "&school_id={school_id}&year={year}&local_province_id={province}"
+    "&page={page}&size=20&special_group=&local_batch_id=&local_type_id=&keyword="
+)
 _GAOKAO_TYPE_NAMES = {
     "1": "理科",
     "2": "文科",
@@ -52,6 +63,8 @@ _GAOKAO_TYPE_NAMES = {
     "2295": "体育类(物理)",
 }
 _PLAN_TABLE_HEADERS = (
+    "院校代码",
+    "学校代码",
     "专业名称",
     "专业",
     "科类",
@@ -80,7 +93,7 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
     name: str = "enrollment_plan_spider"
     task_type: str = TaskType.ENROLLMENT_PLANS
 
-    allowed_domains: ClassVar[set[str]] = {"static-data.gaokao.cn"}
+    allowed_domains: ClassVar[set[str]] = {"static-data.gaokao.cn", "api.zjzw.cn"}
     concurrent_requests = 8
     concurrent_requests_per_domain = 4
     download_delay = 0.2
@@ -102,8 +115,13 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         async with pool.acquire() as conn:
             rows = await conn.fetch("SELECT id, sch_id, name FROM schools ORDER BY id")
 
-        provinces = await load_province_targets(pool)
-        years = _select_plan_years(self.mode, datetime.now())
+        provinces = await load_province_targets(pool, self._crawl_config.target_provinces)
+        years = _select_plan_years(
+            self.mode,
+            datetime.now(),
+            target_start_year=self._crawl_config.target_year_start,
+            target_end_year=self._crawl_config.target_year_end,
+        )
         schools = [{"id": int(row["id"]), "sch_id": int(row["sch_id"]), "name": str(row["name"])} for row in rows]
         province_meta = [
             {"id": province.id, "name": province.name, "code": province.url_value} for province in provinces
@@ -159,9 +177,13 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         if not isinstance(data, dict):
             return
 
-        available_years_by_province = data.get("year")
+        # Live dictionary shape: data.newsdata.year = {province_code: [years...]}
+        newsdata = data.get("newsdata") if isinstance(data.get("newsdata"), dict) else {}
+        available_years_by_province = newsdata.get("year") if isinstance(newsdata, dict) else None
         if not isinstance(available_years_by_province, dict):
-            return
+            available_years_by_province = data.get("year") if isinstance(data.get("year"), dict) else {}
+        if not isinstance(available_years_by_province, dict):
+            available_years_by_province = {}
 
         gaokao_school_id = response.request.meta.get("gaokao_school_id")
         allowed_years = _normalize_year_list(response.request.meta.get("years") or [])
@@ -169,16 +191,13 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         for province in response.request.meta.get("provinces") or []:
             province_code = str(province.get("code") or "").strip()
             available_years = {_safe_int(year) for year in available_years_by_province.get(province_code, [])}
-            missing_years = sorted(set(allowed_years) - available_years)
-            if missing_years:
-                logger.debug(
-                    "Enrollment plan dictionary missing years for school=%s province=%s available=%s missing=%s",
-                    response.request.meta.get("school_name"),
-                    province_code,
-                    sorted(year for year in available_years if year is not None),
-                    missing_years,
-                )
-            for year in allowed_years:
+            # If dictionary has province years, only request those; otherwise fall back to allowed_years.
+            years_to_fetch = (
+                sorted(year for year in available_years if year is not None and year in set(allowed_years))
+                if available_years
+                else allowed_years
+            )
+            for year in years_to_fetch:
                 yield Request(
                     PLAN_URL_TEMPLATE.format(school_id=gaokao_school_id, year=year, province=province_code),
                     callback=self.parse,
@@ -189,6 +208,7 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
                         "province_id": province.get("id"),
                         "province_code": province_code,
                         "year": year,
+                        "page": 1,
                     },
                 )
 
@@ -206,6 +226,35 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         if result is not None:
             async for item in self._parse_static_plan_json(response, result):
                 yield item
+
+            # Paginate zjzw API responses when more pages remain.
+            data = result.get("data") if isinstance(result.get("data"), dict) else {}
+            items = data.get("item") if isinstance(data, dict) else None
+            num_found = _safe_int(data.get("numFound")) if isinstance(data, dict) else None
+            page = _safe_int(response.request.meta.get("page")) or 1
+            gaokao_school_id = response.request.meta.get("gaokao_school_id")
+            province_code = response.request.meta.get("province_code")
+            if (
+                gaokao_school_id
+                and province_code
+                and isinstance(items, list)
+                and num_found is not None
+                and page * 50 < num_found
+            ):
+                next_page = page + 1
+                yield Request(
+                    PLAN_API_PAGE_URL_TEMPLATE.format(
+                        school_id=gaokao_school_id,
+                        year=year,
+                        province=province_code,
+                        page=next_page,
+                    ),
+                    callback=self.parse,
+                    meta={
+                        **dict(response.request.meta),
+                        "page": next_page,
+                    },
+                )
             return
 
         async for item in self._parse_html_plan(response):
@@ -261,6 +310,7 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         batch_info = normalize_batch(batch)
         data = {
             "school_id": response.request.meta.get("school_id"),
+            "school_code_raw": _cell_text(cells, _column_index(header_map, ("院校代码", "学校代码"), -1)),
             "province_id": response.request.meta.get("province_id"),
             "year": response.request.meta.get("year"),
             "subject_category_id": subject_category_id,
@@ -297,27 +347,19 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         if result.get("code") != "0000":
             return
 
-        data = result.get("data")
-        if not isinstance(data, dict):
-            return
+        records = _extract_plan_records(result.get("data"))
 
         async with (await self._get_pool()).acquire() as conn:
-            for group in data.values():
-                if not isinstance(group, dict):
+            for record in records:
+                if not isinstance(record, dict):
                     continue
-                records = group.get("item")
-                if not isinstance(records, list):
+                item_data = await self._build_static_plan_item(conn, response, record)
+                if item_data is None:
                     continue
-                for record in records:
-                    if not isinstance(record, dict):
-                        continue
-                    item_data = await self._build_static_plan_item(conn, response, record)
-                    if item_data is None:
-                        continue
-                    item = validate_item(EnrollmentPlanItem, item_data)
-                    if item:
-                        yield item
-                        await self._persist_item(item)
+                item = validate_item(EnrollmentPlanItem, item_data)
+                if item:
+                    yield item
+                    await self._persist_item(item)
 
     async def _build_static_plan_item(self, conn, response: Response, record: dict[str, Any]) -> dict[str, Any] | None:
         if response.request is None:
@@ -344,6 +386,11 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
 
         item_data = {
             "school_id": school_id,
+            "school_code_raw": _first_text(
+                record.get("school_code"),
+                record.get("school_code_raw"),
+                record.get("local_school_code"),
+            ),
             "province_id": province_id,
             "year": year,
             "subject_category_id": subject_category_id,
@@ -402,6 +449,21 @@ def _column_index(header_map: dict[str, int] | None, candidates: tuple[str, ...]
         if candidate in header_map:
             return header_map[candidate]
     return default
+
+
+def _extract_plan_records(data: Any) -> list[Any]:
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    if isinstance(data.get("item"), list):
+        return data["item"]
+
+    records: list[Any] = []
+    for group in data.values():
+        if isinstance(group, dict) and isinstance(group.get("item"), list):
+            records.extend(group["item"])
+    return records
 
 
 def _cell_text(cells, index: int) -> str | None:
@@ -479,15 +541,27 @@ async def _resolve_major_id(conn, major_name: str) -> int | None:
     return None
 
 
-def _select_plan_years(mode: str, now: datetime) -> list[int]:
+def _select_plan_years(
+    mode: str,
+    now: datetime,
+    *,
+    target_start_year: int | None = None,
+    target_end_year: int | None = None,
+) -> list[int]:
     if mode != "incremental":
-        return list(range(YEAR_START, now.year + 1))
-
-    if now.month == 12:
-        candidates = [now.year, now.year - 1, now.year - 2]
+        years = list(range(YEAR_START, now.year + 1))
+    elif now.month == 12:
+        years = [now.year, now.year - 1, now.year - 2]
     else:
-        candidates = [now.year - 1, now.year - 2, now.year - 3]
-    return [year for year in candidates if year >= YEAR_START]
+        years = [now.year - 1, now.year - 2, now.year - 3]
+
+    return [
+        year
+        for year in years
+        if year >= YEAR_START
+        and (target_start_year is None or year >= target_start_year)
+        and (target_end_year is None or year <= target_end_year)
+    ]
 
 
 def _normalize_year_list(years: list[int | str | None]) -> list[int]:

@@ -14,6 +14,8 @@ def test_enrollment_plans_existing_tables_get_conflict_target_index() -> None:
     assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_enrollment_plans_unique_key" in schema_sql
     assert "ON enrollment_plans(school_id, province_id, year, subject_category_id, batch, major_name)" in schema_sql
     assert "NULLS NOT DISTINCT" in schema_sql
+    assert "school_code_raw VARCHAR(50)" in schema_sql
+    assert "ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS school_code_raw VARCHAR(50)" in schema_sql
 
 
 def test_school_majors_existing_tables_get_school_major_strength_columns() -> None:

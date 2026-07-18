@@ -414,6 +414,7 @@ CREATE TRIGGER update_score_segments_updated_at BEFORE UPDATE ON score_segments
 CREATE TABLE IF NOT EXISTS enrollment_plans (
     id              BIGSERIAL PRIMARY KEY,
     school_id       BIGINT NOT NULL REFERENCES schools(id),
+    school_code_raw VARCHAR(50),
     province_id     INTEGER NOT NULL REFERENCES provinces(id),
     year            SMALLINT NOT NULL,
     subject_category_id INTEGER REFERENCES subject_categories(id),
@@ -457,6 +458,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_enrollment_plans_unique_key
     ON enrollment_plans(school_id, province_id, year, subject_category_id, batch, major_name) NULLS NOT DISTINCT;
 
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS major_group_code VARCHAR(50);
+ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS school_code_raw VARCHAR(50);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS batch_code VARCHAR(30);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS batch_category VARCHAR(30);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS batch_segment VARCHAR(30);

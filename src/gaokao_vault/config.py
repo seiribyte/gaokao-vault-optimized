@@ -39,6 +39,9 @@ class CrawlConfig(BaseSettings):
     heartbeat_interval: int = 120  # Heartbeat log interval in seconds
     school_major_min_ready_schools: int = 100
     school_major_min_ready_majors: int = 100
+    target_provinces: list[str] = Field(default_factory=list)
+    target_year_start: int | None = None
+    target_year_end: int | None = None
 
 
 class ScheduleConfig(BaseSettings):
