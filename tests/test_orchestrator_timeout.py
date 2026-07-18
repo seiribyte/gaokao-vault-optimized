@@ -3,10 +3,22 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from gaokao_vault.config import CrawlConfig
 from gaokao_vault.scheduler.orchestrator import Orchestrator
 
 NO_ACTIVE_CRAWL_MESSAGE = "No active crawl to stop"
+CHECKPOINT_FAILURE_MESSAGE = "checkpoint failure"
+
+
+class _CheckpointExceptionGroup(Exception):
+    def __init__(self) -> None:
+        super().__init__(CHECKPOINT_FAILURE_MESSAGE)
+        self.exceptions = [FileExistsError("checkpoint replace failed")]
+
+    def split(self, _predicate):
+        return self, None
 
 
 class _PausableTimeoutSpider:
@@ -56,3 +68,15 @@ def test_run_single_pauses_active_spider_before_cancelling_timeout() -> None:
     assert stats["failed"] == 1
     assert created_spiders[0].pause_called_while_active is True
     orch.task_manager.finish_task.assert_awaited_once()
+
+
+def test_run_spider_stream_propagates_checkpoint_errors() -> None:
+    class _CheckpointFailSpider:
+        name = "checkpoint_fail_spider"
+
+        async def stream(self):
+            raise _CheckpointExceptionGroup
+            yield None
+
+    with pytest.raises(_CheckpointExceptionGroup, match=CHECKPOINT_FAILURE_MESSAGE):
+        asyncio.run(Orchestrator._run_spider_stream(_CheckpointFailSpider()))

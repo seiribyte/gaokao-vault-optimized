@@ -33,16 +33,6 @@ logger = logging.getLogger(__name__)
 _TIMEOUT_PAUSE_DRAIN_SECONDS = 30.0
 
 
-def _is_checkpoint_error(exc: BaseException) -> bool:
-    """Check if an exception is a non-fatal checkpoint serialization/file error."""
-    if hasattr(exc, "exceptions"):  # ExceptionGroup
-        return all(_is_checkpoint_error(e) for e in exc.exceptions)  # ty: ignore[not-iterable]
-    msg = str(exc).lower()
-    if isinstance(exc, AttributeError) and ("pickle" in msg or "can't get local object" in msg):
-        return True
-    return isinstance(exc, (FileNotFoundError, OSError)) and "checkpoint" in msg
-
-
 SPIDER_MAP: dict[str, type[BaseGaokaoSpider]] = {
     TaskType.SCHOOLS: SchoolSpider,
     TaskType.MAJORS: MajorSpider,
@@ -251,22 +241,8 @@ class Orchestrator:
     @staticmethod
     async def _run_spider_stream(spider) -> None:
         """Consume spider.stream() to drive the crawl in the current event loop."""
-        try:
-            async for _item in spider.stream():
-                pass  # items are processed in spider callbacks via process_item
-        except Exception as eg:
-            if not hasattr(eg, "split"):
-                raise
-            checkpoint_errors, other_errors = eg.split(_is_checkpoint_error)  # ty: ignore[call-non-callable]
-            if checkpoint_errors:
-                logger.warning(
-                    "Ignoring %d checkpoint error(s) in spider %s: %s",
-                    len(checkpoint_errors.exceptions),
-                    spider.name,
-                    checkpoint_errors,
-                )
-            if other_errors:
-                raise other_errors from None
+        async for _item in spider.stream():
+            pass  # items are processed in spider callbacks via process_item
 
     @staticmethod
     def _phase_summary(results: list | None) -> tuple[bool, int, int]:
