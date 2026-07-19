@@ -49,7 +49,7 @@ def init_db(
     """Initialize database: create tables and seed data."""
     _setup_logging(verbose)
 
-    async def _run():
+    async def _run() -> None:
         from gaokao_vault.db.connection import close_pool, create_pool
         from gaokao_vault.db.migrate import run_migrations
 
@@ -79,7 +79,7 @@ def crawl(
     crawl_cfg = CrawlConfig()
     _setup_logging(verbose, log_dir=crawl_cfg.log_dir)
 
-    async def _run():
+    async def _run() -> None:
         from gaokao_vault.config import AppConfig
         from gaokao_vault.db.connection import close_pool, create_pool
         from gaokao_vault.scheduler.orchestrator import Orchestrator
@@ -112,7 +112,7 @@ def run_spider(
     crawl_cfg = CrawlConfig()
     _setup_logging(verbose, log_dir=crawl_cfg.log_dir)
 
-    async def _run():
+    async def _run() -> dict[str, int]:
         from gaokao_vault.config import AppConfig
         from gaokao_vault.db.connection import close_pool, create_pool
         from gaokao_vault.scheduler.orchestrator import Orchestrator
@@ -124,11 +124,19 @@ def run_spider(
                 db_pool=pool, config=config.crawl, mode=mode, db_config=config.db, app_config=config
             )
             stats = await orchestrator.run_single(spider_name)
-            typer.echo(f"Spider {spider_name} finished: {stats}")
+            if stats.get("failed", 0):
+                msg = f"Spider {spider_name} failed: {stats}"
+                raise RuntimeError(msg)
+            return stats
         finally:
             await close_pool()
 
-    asyncio.run(_run())
+    try:
+        stats = asyncio.run(_run())
+    except (ValueError, RuntimeError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Spider {spider_name} finished: {stats}")
 
 
 @app.command()
@@ -213,7 +221,7 @@ def export_liaoning(
 
     try:
         summary = asyncio.run(_run())
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(
@@ -282,7 +290,7 @@ def crawl_liaoning(
 
     try:
         summary = asyncio.run(_run())
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(

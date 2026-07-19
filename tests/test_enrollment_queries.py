@@ -68,7 +68,11 @@ def test_upsert_enrollment_plan_preserves_rule_and_quality_fields() -> None:
     assert "source_url" in conn.query
     assert "physical_exam_or_political_review" in conn.query
     assert "political_review_requirement" in conn.query
-    assert "ON CONFLICT (school_id, province_id, year, subject_category_id, batch, major_name)" in conn.query
+    normalized_query = " ".join(conn.query.split())
+    assert (
+        "ON CONFLICT ( school_id, province_id, year, subject_category_id, batch, "
+        "school_code_raw, major_group_code, major_code_raw, major_name )"
+    ) in normalized_query
     assert "WITH updated AS" not in conn.query
     assert "WHERE NOT EXISTS (SELECT 1 FROM updated)" not in conn.query
     assert "regular" in conn.args

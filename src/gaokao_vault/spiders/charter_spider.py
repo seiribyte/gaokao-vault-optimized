@@ -81,7 +81,10 @@ class CharterSpider(BaseGaokaoSpider):
         school_id = None
         if school_name:
             async with (await self._get_pool()).acquire() as conn:
-                row = await conn.fetchrow("SELECT id FROM schools WHERE name = $1", school_name)
+                row = await conn.fetchrow(
+                    "SELECT id FROM schools WHERE name = $1 ORDER BY (sch_id > 0) DESC, id LIMIT 1",
+                    school_name,
+                )
                 if row:
                     school_id = row["id"]
 

@@ -73,3 +73,13 @@ make docs                        # local docs server
 - Run `make check` before committing to ensure lint and type checks pass
 - Run `make test` to verify no regressions
 - Keep Chinese comments/docstrings where domain context requires it
+
+## Cross-session review baseline
+
+Before reviewing or changing behavior, read `docs/review-baseline.md` together with the relevant architecture documents and tests. The baseline records decisions that may intentionally differ from generic best practices.
+
+- Review an explicit `BASE..HEAD` range; ask for the range when it is not supplied.
+- Classify a recorded, evidence-backed deviation as `intentional behavior`, not a bug.
+- Report findings only with a location, evidence, impact, and the violated contract.
+- If a decision conflicts with a test, security boundary, or current request, report the conflict and ask before changing the strategy.
+- After implementing a non-default behavior, update the baseline or an ADR and add a fixture/test that locks it down.

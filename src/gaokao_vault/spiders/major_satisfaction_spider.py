@@ -25,7 +25,7 @@ class MajorSatisfactionSpider(BaseGaokaoSpider):
 
     async def start_requests(self):
         async with (await self._get_pool()).acquire() as conn:
-            rows = await conn.fetch("SELECT id, sch_id FROM schools ORDER BY id")
+            rows = await conn.fetch("SELECT id, sch_id FROM schools WHERE sch_id > 0 ORDER BY id")
 
         for row in rows:
             school_id = row["id"]

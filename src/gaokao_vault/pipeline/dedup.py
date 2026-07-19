@@ -39,14 +39,43 @@ TABLE_MAP: dict[str, tuple[str, str, list[str]]] = {
         "enrollment_plans",
         "school_id = $1 AND province_id = $2 AND year = $3 "
         "AND subject_category_id IS NOT DISTINCT FROM $4 "
-        "AND batch IS NOT DISTINCT FROM $5 AND major_name IS NOT DISTINCT FROM $6",
-        ["school_id", "province_id", "year", "subject_category_id", "batch", "major_name"],
+        "AND batch IS NOT DISTINCT FROM $5 "
+        "AND school_code_raw IS NOT DISTINCT FROM $6 "
+        "AND major_group_code IS NOT DISTINCT FROM $7 "
+        "AND major_code_raw IS NOT DISTINCT FROM $8 "
+        "AND major_name IS NOT DISTINCT FROM $9",
+        [
+            "school_id",
+            "province_id",
+            "year",
+            "subject_category_id",
+            "batch",
+            "school_code_raw",
+            "major_group_code",
+            "major_code_raw",
+            "major_name",
+        ],
     ),
     "major_admission_results": (
         "major_admission_results",
         "school_id = $1 AND major_id = $2 AND province_id = $3 AND year = $4 "
-        "AND subject_category_id IS NOT DISTINCT FROM $5 AND batch = $6",
-        ["school_id", "major_id", "province_id", "year", "subject_category_id", "batch"],
+        "AND subject_category_id IS NOT DISTINCT FROM $5 AND batch = $6 "
+        "AND school_code_raw IS NOT DISTINCT FROM $7 "
+        "AND major_group_code IS NOT DISTINCT FROM $8 "
+        "AND major_code_raw IS NOT DISTINCT FROM $9 "
+        "AND major_name_raw IS NOT DISTINCT FROM $10",
+        [
+            "school_id",
+            "major_id",
+            "province_id",
+            "year",
+            "subject_category_id",
+            "batch",
+            "school_code_raw",
+            "major_group_code",
+            "major_code_raw",
+            "major_name_raw",
+        ],
     ),
     "special_enrollments": (
         "special_enrollments",

@@ -9,13 +9,30 @@ def _normalize_sql(sql: str) -> str:
 
 
 def test_enrollment_plans_existing_tables_get_conflict_target_index() -> None:
-    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
 
-    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_enrollment_plans_unique_key" in schema_sql
-    assert "ON enrollment_plans(school_id, province_id, year, subject_category_id, batch, major_name)" in schema_sql
+    assert "DROP INDEX IF EXISTS idx_enrollment_plans_unique_key" in schema_sql
+    assert "CREATE UNIQUE INDEX idx_enrollment_plans_unique_key" in schema_sql
+    assert (
+        "ON enrollment_plans( school_id, province_id, year, subject_category_id, batch, "
+        "school_code_raw, major_group_code, major_code_raw, major_name )"
+    ) in schema_sql
     assert "NULLS NOT DISTINCT" in schema_sql
     assert "school_code_raw VARCHAR(50)" in schema_sql
     assert "ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS school_code_raw VARCHAR(50)" in schema_sql
+
+
+def test_school_and_admission_source_identities_are_migrated() -> None:
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+
+    assert "ALTER TABLE schools ADD COLUMN IF NOT EXISTS gaokao_school_id INTEGER" in schema_sql
+    assert "ON schools(gaokao_school_id) WHERE gaokao_school_id IS NOT NULL" in schema_sql
+    assert "FROM unnest(constraint_row.conkey) WITH ORDINALITY" in schema_sql
+    assert "DROP INDEX IF EXISTS idx_major_admission_results_unique_key" in schema_sql
+    assert (
+        "ON major_admission_results( school_id, major_id, province_id, year, subject_category_id, batch, "
+        "school_code_raw, major_group_code, major_code_raw, major_name_raw )"
+    ) in schema_sql
 
 
 def test_school_majors_existing_tables_get_school_major_strength_columns() -> None:
@@ -178,6 +195,14 @@ def test_vector_documents_view_is_declared() -> None:
     assert "'source_section', se.source_section" in schema_sql
     assert "'detail_url', se.detail_url" in schema_sql
     assert "'milestones', se.milestones" in schema_sql
+
+
+def test_school_source_view_does_not_guess_unknown_ownership() -> None:
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+
+    assert "WHEN s.is_sino_foreign THEN '中外合作办学'" in schema_sql
+    assert "WHEN s.crawl_task_id IS NOT NULL THEN '公办'" in schema_sql
+    assert "ELSE NULL END AS ownership_type" in schema_sql
 
 
 def test_admission_records_view_is_dropped_before_recreate_to_allow_column_order_changes() -> None:

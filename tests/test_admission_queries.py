@@ -56,7 +56,11 @@ def test_upsert_major_admission_result_uses_natural_key() -> None:
 
     assert admission_id == 88
     assert "major_admission_results" in conn.query
-    assert "ON CONFLICT (school_id, major_id, province_id, year, subject_category_id, batch)" in conn.query
+    normalized_query = " ".join(conn.query.split())
+    assert (
+        "ON CONFLICT ( school_id, major_id, province_id, year, subject_category_id, batch, "
+        "school_code_raw, major_group_code, major_code_raw, major_name_raw )"
+    ) in normalized_query
     assert "major_group_code" in conn.query
     assert "batch_code" in conn.query
     assert "batch_category" in conn.query

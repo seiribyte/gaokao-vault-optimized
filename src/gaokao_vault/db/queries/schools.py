@@ -6,21 +6,51 @@ import asyncpg
 async def upsert_school(conn: asyncpg.Connection, data: dict) -> int:
     row = await conn.fetchrow(
         """
-        INSERT INTO schools (sch_id, name, province_id, city, authority, level,
-            is_211, is_985, is_double_first, is_private, is_independent, is_sino_foreign,
-            school_type, website, phone, email, address, introduction, logo_url,
-            content_hash, crawl_task_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
-        ON CONFLICT (sch_id) DO UPDATE SET
-            name=EXCLUDED.name, province_id=COALESCE(EXCLUDED.province_id, schools.province_id), city=EXCLUDED.city,
-            authority=EXCLUDED.authority, level=EXCLUDED.level,
-            is_211=EXCLUDED.is_211, is_985=EXCLUDED.is_985, is_double_first=EXCLUDED.is_double_first,
-            is_private=EXCLUDED.is_private, is_independent=EXCLUDED.is_independent,
-            is_sino_foreign=EXCLUDED.is_sino_foreign, school_type=EXCLUDED.school_type,
-            website=EXCLUDED.website, phone=EXCLUDED.phone, email=EXCLUDED.email,
-            address=EXCLUDED.address, introduction=EXCLUDED.introduction, logo_url=EXCLUDED.logo_url,
-            content_hash=EXCLUDED.content_hash, crawl_task_id=EXCLUDED.crawl_task_id
-        RETURNING id
+        WITH placeholder AS (
+            SELECT MIN(id) AS id
+            FROM schools
+            WHERE name = $2
+              AND sch_id < 0
+              AND gaokao_school_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM schools WHERE sch_id = $1)
+            HAVING COUNT(*) = 1
+        ),
+        promoted AS (
+            UPDATE schools AS school
+            SET sch_id=$1, name=$2, province_id=COALESCE($3, school.province_id), city=$4,
+                authority=$5, level=$6, is_211=$7, is_985=$8, is_double_first=$9,
+                is_private=$10, is_independent=$11, is_sino_foreign=$12, school_type=$13,
+                website=$14, phone=$15, email=$16, address=$17, introduction=$18, logo_url=$19,
+                content_hash=$20, crawl_task_id=$21
+            FROM placeholder
+            WHERE school.id = placeholder.id
+            RETURNING school.id
+        ),
+        upserted AS (
+            INSERT INTO schools (sch_id, name, province_id, city, authority, level,
+                is_211, is_985, is_double_first, is_private, is_independent, is_sino_foreign,
+                school_type, website, phone, email, address, introduction, logo_url,
+                content_hash, crawl_task_id)
+            SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
+            WHERE NOT EXISTS (SELECT 1 FROM promoted)
+            ON CONFLICT (sch_id) DO UPDATE SET
+                name=EXCLUDED.name,
+                province_id=COALESCE(EXCLUDED.province_id, schools.province_id),
+                city=EXCLUDED.city, authority=EXCLUDED.authority, level=EXCLUDED.level,
+                is_211=EXCLUDED.is_211, is_985=EXCLUDED.is_985,
+                is_double_first=EXCLUDED.is_double_first, is_private=EXCLUDED.is_private,
+                is_independent=EXCLUDED.is_independent, is_sino_foreign=EXCLUDED.is_sino_foreign,
+                school_type=EXCLUDED.school_type, website=EXCLUDED.website, phone=EXCLUDED.phone,
+                email=EXCLUDED.email, address=EXCLUDED.address, introduction=EXCLUDED.introduction,
+                logo_url=EXCLUDED.logo_url, content_hash=EXCLUDED.content_hash,
+                crawl_task_id=EXCLUDED.crawl_task_id
+            WHERE schools.name = EXCLUDED.name OR schools.crawl_task_id IS NOT NULL
+            RETURNING id
+        )
+        SELECT id FROM promoted
+        UNION ALL
+        SELECT id FROM upserted
+        LIMIT 1
         """,
         data["sch_id"],
         data["name"],
@@ -44,6 +74,9 @@ async def upsert_school(conn: asyncpg.Connection, data: dict) -> int:
         data.get("content_hash"),
         data.get("crawl_task_id"),
     )
+    if row is None:
+        msg = f"拒绝用 CHSI 学校 {data['name']} 覆盖 sch_id={data['sch_id']} 的未确认目录记录"
+        raise ValueError(msg)
     return row["id"]
 
 
@@ -53,7 +86,10 @@ async def find_school_by_sch_id(conn: asyncpg.Connection, sch_id: int) -> dict |
 
 
 async def find_school_by_name(conn: asyncpg.Connection, name: str) -> dict | None:
-    row = await conn.fetchrow("SELECT id, sch_id, name FROM schools WHERE name = $1 ORDER BY id LIMIT 1", name)
+    row = await conn.fetchrow(
+        "SELECT id, sch_id, name FROM schools WHERE name = $1 ORDER BY (sch_id > 0) DESC, id LIMIT 1",
+        name,
+    )
     return dict(row) if row else None
 
 

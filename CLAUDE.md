@@ -51,3 +51,13 @@ make docs                        # 本地文档服务
 - 数据库 Schema 定义在 `src/gaokao_vault/db/schema.sql`
 - Docker Compose 支持一键启动（`docker compose up -d db`）
 - 日志持久化到 `crawl_data/logs/crawl.log`（RotatingFileHandler，50MB，保留 5 个备份），可通过 `GAOKAO_CRAWL__LOG_DIR` 环境变量修改路径
+
+## 跨会话审查基线
+
+审查或修改行为前，先读取 `docs/review-baseline.md`、相关架构文档和测试。该文件记录了可能不同于通用最佳实践的已确认决定。
+
+- 必须明确 `BASE..HEAD` 审查范围；没有范围先询问。
+- 有证据且符合基线的非默认行为标记为 `intentional behavior`，不要当作 bug。
+- finding 必须包含代码位置、证据、影响和违反的契约。
+- 如果决定与测试、安全边界或当前需求冲突，先报告冲突并等待确认。
+- 新的非默认行为必须更新基线或 ADR，并增加 fixture/测试。

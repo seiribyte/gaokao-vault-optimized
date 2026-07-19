@@ -45,7 +45,7 @@ class _FakeTaskStatusConnection:
 
     async def fetch(self, query: str, *args: object):
         self.fetch_calls.append((query, args))
-        if "FROM schools ORDER BY id" in query:
+        if "FROM schools" in query and "ORDER BY id" in query:
             return self.schools
         if "FROM provinces ORDER BY id" in query:
             return self.provinces

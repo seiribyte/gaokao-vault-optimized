@@ -132,6 +132,10 @@ class DxsbbAdmissionResultSpider(BaseGaokaoSpider):
                 "year": item["year"],
                 "subject_category_id": item.get("subject_category_id"),
                 "batch": item["batch"],
+                "school_code_raw": item.get("school_code_raw"),
+                "major_group_code": item.get("major_group_code"),
+                "major_code_raw": item.get("major_code_raw"),
+                "major_name_raw": item.get("major_name_raw"),
             },
             upsert_fn=upsert_major_admission_result,
         )
@@ -403,7 +407,10 @@ def _parse_score(value: str) -> int | None:
 
 
 async def _find_school_by_name(conn: asyncpg.Connection, school_name: str) -> dict | None:
-    row = await conn.fetchrow("SELECT id, name FROM schools WHERE name = $1", school_name)
+    row = await conn.fetchrow(
+        "SELECT id, name FROM schools WHERE name = $1 ORDER BY (sch_id > 0) DESC, id LIMIT 1",
+        school_name,
+    )
     return dict(row) if row else None
 
 

@@ -59,7 +59,7 @@ class _FakeTaskStatusConnection:
 
     async def fetch(self, query: str, *args: object):
         self.fetch_calls.append((query, args))
-        if "FROM schools ORDER BY id" in query:
+        if "FROM schools" in query and "ORDER BY id" in query:
             return self.schools
         return []
 
@@ -474,7 +474,7 @@ def test_start_requests_uses_existing_upstream_rows_when_latest_school_task_fail
     assert len(requests) == 1
     assert requests[0].meta == {"school_id": 1, "sch_id": 34}
     assert [query for query, _args in conn.fetchval_calls] == [
-        "SELECT COUNT(*) FROM schools",
+        "SELECT COUNT(*) FROM schools WHERE sch_id > 0",
         "SELECT COUNT(*) FROM majors",
     ]
 

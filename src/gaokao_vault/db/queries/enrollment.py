@@ -17,7 +17,10 @@ async def upsert_enrollment_plan(conn: asyncpg.Connection, data: dict) -> int:
             data_source, source_url, source_updated_at, quality_flags,
             content_hash, crawl_task_id)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)
-        ON CONFLICT (school_id, province_id, year, subject_category_id, batch, major_name) DO UPDATE SET
+        ON CONFLICT (
+            school_id, province_id, year, subject_category_id, batch,
+            school_code_raw, major_group_code, major_code_raw, major_name
+        ) DO UPDATE SET
             school_code_raw = EXCLUDED.school_code_raw,
             batch_code = EXCLUDED.batch_code,
             batch_category = EXCLUDED.batch_category,

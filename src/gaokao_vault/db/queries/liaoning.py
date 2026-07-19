@@ -41,6 +41,7 @@ async def fetch_liaoning_export_plans(
             school_province.name AS school_province,
             s.sch_id,
             s.name AS school_name,
+            s.crawl_task_id AS school_crawl_task_id,
             s.city,
             s.authority,
             s.level AS school_level,
