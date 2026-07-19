@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from scrapling.parser import Adaptor
 from scrapling.spiders import Request
+from scrapling.spiders.session import SessionManager
 
 import gaokao_vault.spiders.enrollment_plan_spider as enrollment_plan_spider
 from gaokao_vault.config import CrawlConfig, DatabaseConfig
@@ -297,6 +299,24 @@ def test_start_requests_bootstraps_gaokao_school_name_index() -> None:
     assert requests[0].meta["provinces"] == [{"id": 7, "name": "吉林", "code": "22"}]
 
 
+def test_start_requests_prefers_chsi_row_when_gaokao_placeholder_is_duplicate() -> None:
+    spider = _make_spider()
+
+    class _DuplicateSchoolConnection(_FakeStartConnection):
+        async def fetch(self, query: str, *args: object):
+            if "FROM schools ORDER BY id" in query:
+                return [
+                    {"id": 1, "sch_id": -900, "gaokao_school_id": 118, "name": "苏州大学"},
+                    {"id": 2, "sch_id": 34, "gaokao_school_id": None, "name": "苏州大学"},
+                ]
+            return await super().fetch(query, *args)
+
+    with patch.object(spider, "_get_pool", new=AsyncMock(return_value=_FakePool(_DuplicateSchoolConnection()))):
+        requests = asyncio.run(_collect(spider.start_requests()))
+
+    assert requests[0].meta["schools"] == [{"id": 2, "sch_id": 34, "name": "苏州大学", "gaokao_school_id": "118"}]
+
+
 def test_configure_sessions_uses_browser_headers_for_plan_api() -> None:
     spider = _make_spider()
     manager = MagicMock()
@@ -305,10 +325,98 @@ def test_configure_sessions_uses_browser_headers_for_plan_api() -> None:
         spider.configure_sessions(manager)
 
     kwargs = session_cls.call_args.kwargs
+    registered_session = manager.add.call_args.args[1]
+    assert isinstance(registered_session, enrollment_plan_spider._PlanApiThrottleSession)
     assert kwargs["impersonate"] == "chrome"
     assert kwargs["headers"]["Origin"] == "https://www.gaokao.cn"
     assert kwargs["headers"]["Referer"] == "https://www.gaokao.cn/"
     assert kwargs["headers"]["User-Agent"].startswith("Mozilla/5.0")
+    assert kwargs["retries"] == 1
+
+
+def test_plan_api_request_uses_consistent_headers() -> None:
+    spider = _make_spider()
+    request = asyncio.run(
+        spider._make_plan_api_request(
+            "https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school",
+            {"school_id": 1, "province_code": "21", "year": 2026, "page": 1},
+        )
+    )
+
+    assert request._session_kwargs["headers"]["Origin"] == "https://www.gaokao.cn"
+    assert request._session_kwargs["headers"]["Referer"] == "https://www.gaokao.cn/"
+    assert request._session_kwargs["headers"]["User-Agent"] == spider._plan_api_user_agent
+
+
+def test_plan_api_session_throttles_at_actual_send_time() -> None:
+    throttle = MagicMock()
+    throttle.wait = AsyncMock()
+    client = MagicMock()
+    client._make_request = AsyncMock(return_value=object())
+    raw_session = MagicMock()
+    raw_session._is_alive = False
+    raw_session.__aenter__ = AsyncMock(return_value=client)
+    raw_session.__aexit__ = AsyncMock(return_value=None)
+    session = enrollment_plan_spider._PlanApiThrottleSession(raw_session, throttle)
+
+    async def run() -> None:
+        await session.__aenter__()
+        try:
+            await session.fetch(
+                url="https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school",
+                headers={"Origin": "https://www.gaokao.cn"},
+            )
+            await session.fetch(url="https://static-data.gaokao.cn/www/2.0/school/name.json")
+        finally:
+            await session.__aexit__(None, None, None)
+
+    asyncio.run(run())
+
+    throttle.wait.assert_awaited_once_with()
+    assert client._make_request.await_count == 2
+    assert client._make_request.await_args_list[0].kwargs["method"] == "GET"
+    assert client._make_request.await_args_list[0].kwargs["url"].startswith("https://api.zjzw.cn/")
+
+
+def test_plan_api_session_works_through_scrapling_session_manager() -> None:
+    throttle = MagicMock()
+    throttle.wait = AsyncMock()
+    client = MagicMock()
+    client._make_request = AsyncMock(return_value=MagicMock())
+    raw_session = MagicMock()
+    raw_session._is_alive = False
+    raw_session.__aenter__ = AsyncMock(return_value=client)
+    raw_session.__aexit__ = AsyncMock(return_value=None)
+    session = enrollment_plan_spider._PlanApiThrottleSession(raw_session, throttle)
+    manager = SessionManager()
+    manager.add("http", cast(Any, session))
+
+    async def run() -> None:
+        async with manager:
+            await manager.fetch(Request("https://api.zjzw.cn/web/api", sid="http"))
+
+    asyncio.run(run())
+
+    throttle.wait.assert_awaited_once_with()
+    client._make_request.assert_awaited_once()
+
+
+def test_plan_api_rate_limit_extends_shared_throttle() -> None:
+    spider = _make_spider()
+    request = Request("https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school", sid="http")
+    response = _make_json_response(
+        {"code": "1069", "message": "请求受限", "data": None},
+        request.url,
+    )
+    extend_cooldown = AsyncMock()
+
+    with (
+        patch.object(spider._plan_api_throttle, "extend_cooldown", new=extend_cooldown),
+        patch("gaokao_vault.spiders.enrollment_plan_spider.asyncio.sleep", new=AsyncMock()),
+    ):
+        asyncio.run(spider.retry_blocked_request(request, response))
+
+    extend_cooldown.assert_awaited_once_with(60.0)
 
 
 def test_plan_api_success_payload_is_not_blocked_by_content_text() -> None:
@@ -323,6 +431,18 @@ def test_plan_api_success_payload_is_not_blocked_by_content_text() -> None:
     assert spider._consecutive_plan_api_limits == 0
 
 
+def test_plan_api_http_limit_takes_precedence_over_success_payload() -> None:
+    spider = _make_spider()
+    response = _make_json_response(
+        {"code": "0000", "message": "成功", "data": {"item": []}},
+        "https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school",
+    )
+    response.status = 429
+
+    assert asyncio.run(spider.is_blocked(response)) is True
+    assert spider.concurrent_requests == 1
+
+
 def test_plan_api_business_rate_limit_is_blocked() -> None:
     spider = _make_spider()
     response = _make_json_response(
@@ -331,6 +451,42 @@ def test_plan_api_business_rate_limit_is_blocked() -> None:
     )
 
     assert asyncio.run(spider.is_blocked(response)) is True
+    assert spider.concurrent_requests == 1
+
+
+def test_plan_api_success_restores_normal_concurrency() -> None:
+    spider = _make_spider()
+    blocked_response = _make_json_response(
+        {"code": "1069", "message": "请求受限", "data": None},
+        "https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school",
+    )
+    success_response = _make_json_response(
+        {"code": "0000", "message": "成功", "data": {"item": []}},
+        blocked_response.url,
+    )
+
+    assert asyncio.run(spider.is_blocked(blocked_response)) is True
+    assert asyncio.run(spider.is_blocked(success_response)) is False
+    assert spider.concurrent_requests == 2
+
+
+def test_plan_api_circuit_breaker_pauses_without_another_request() -> None:
+    spider = _make_spider()
+    spider._consecutive_plan_api_limits = 2
+    request = Request("https://api.zjzw.cn/web/api?uri=apidata/api/gkv3/plan/school", sid="http")
+    response = _make_json_response(
+        {"code": "1069", "message": "请求受限", "data": None},
+        request.url,
+    )
+
+    with (
+        patch.object(spider, "pause") as pause,
+        patch("gaokao_vault.spiders.enrollment_plan_spider.asyncio.sleep", new=AsyncMock()) as sleep,
+    ):
+        asyncio.run(spider.retry_blocked_request(request, response))
+
+    pause.assert_called_once_with()
+    sleep.assert_not_awaited()
 
 
 def test_plan_api_retry_keeps_http_session_and_backs_off() -> None:

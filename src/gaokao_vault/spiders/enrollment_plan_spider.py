@@ -8,6 +8,8 @@ from typing import Any, ClassVar
 from scrapling.fetchers import FetcherSession
 from scrapling.spiders import Request, Response
 
+from gaokao_vault.anti_detect.rate_limiter import AdaptiveRequestThrottle
+from gaokao_vault.anti_detect.ua_pool import ua_pool
 from gaokao_vault.constants import TaskType
 from gaokao_vault.db.queries.enrollment import upsert_enrollment_plan
 from gaokao_vault.db.queries.majors import find_majors_by_name
@@ -25,7 +27,7 @@ from gaokao_vault.pipeline.admission_rules import (
 from gaokao_vault.pipeline.batch_normalizer import normalize_batch
 from gaokao_vault.pipeline.quality import missing_field_flags
 from gaokao_vault.pipeline.validator import validate_item
-from gaokao_vault.spiders.base import BaseGaokaoSpider
+from gaokao_vault.spiders.base import BLOCKED_STATUS_CODES, BaseGaokaoSpider
 from gaokao_vault.spiders.response_utils import response_json
 from gaokao_vault.spiders.scope import load_province_targets
 from gaokao_vault.spiders.table_candidates import candidate_tables
@@ -39,9 +41,10 @@ GAOKAO_STATIC_BASE_URL = "https://static-data.gaokao.cn"
 GAOKAO_WEB_ORIGIN = "https://www.gaokao.cn"
 PLAN_API_RATE_LIMIT_CODE = "1069"
 PLAN_API_BACKOFF_SECONDS = (60.0, 180.0, 540.0, 900.0)
+PLAN_API_MIN_DELAY_SECONDS = 2.0
+PLAN_API_CIRCUIT_BREAKER_LIMIT = 3
 PLAN_API_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 )
 SCHOOL_NAME_INDEX_URL = f"{GAOKAO_STATIC_BASE_URL}/www/2.0/school/name.json"
 # Correct dictionary path (legacy /yk/school/... is 404).
@@ -101,6 +104,53 @@ _SCHOOL_NAME_ALIASES = {
 }
 
 
+def _is_plan_api_url(url: str) -> bool:
+    return url.startswith("https://api.zjzw.cn/")
+
+
+class _PlanApiSessionNotStartedError(RuntimeError):
+    """招生计划 API 会话尚未进入 Scrapling 生命周期。"""
+
+
+class _PlanApiThrottleSession:
+    """在 Scrapling 实际发包前给招生计划 API 加统一闸门。
+
+    ``SessionManager`` 对 ``FetcherSession`` 会直接调用内部 client。
+    这里使用组合而不是继承。这样 ``fetch`` 入口能拦截断点恢复和重试请求。
+    """
+
+    def __init__(self, session: FetcherSession, throttle: AdaptiveRequestThrottle) -> None:
+        self._session = session
+        self._throttle = throttle
+        self._client: Any | None = None
+
+    @property
+    def _is_alive(self) -> bool:
+        return self._session._is_alive
+
+    async def __aenter__(self) -> _PlanApiThrottleSession:
+        self._client = await self._session.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        try:
+            await self._session.__aexit__(exc_type, exc_val, exc_tb)
+        finally:
+            self._client = None
+
+    async def fetch(self, *, url: str, **kwargs: Any) -> Any:
+        if _is_plan_api_url(url):
+            await self._throttle.wait()
+
+        client = self._client
+        if client is None:
+            raise _PlanApiSessionNotStartedError
+
+        request_kwargs = dict(kwargs)
+        method = request_kwargs.pop("method", "GET")
+        return await client._make_request(method=method, url=url, **request_kwargs)
+
+
 class EnrollmentPlanSpider(BaseGaokaoSpider):
     """Crawl enrollment plans: school x province x year."""
 
@@ -114,42 +164,67 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
     max_blocked_retries = 6
 
     def __init__(self, *args, **kwargs):
+        self._plan_api_throttle = AdaptiveRequestThrottle(PLAN_API_MIN_DELAY_SECONDS, jitter_ratio=0.5)
+        self._plan_api_user_agent = _choose_plan_api_user_agent()
         super().__init__(*args, **kwargs)
         self.concurrent_requests = min(self.concurrent_requests, 2)
+        self._plan_api_normal_concurrency = self.concurrent_requests
         self.concurrent_requests_per_domain = 1
         self.download_delay = max(self.download_delay, 1.5)
+        self._plan_api_throttle.minimum_delay = max(PLAN_API_MIN_DELAY_SECONDS, self._crawl_config.base_delay)
+        self._plan_api_throttle.jitter_ratio = self._crawl_config.jitter_ratio
         self._plan_api_cooldown_until = 0.0
         self._consecutive_plan_api_limits = 0
         self._plan_api_backoff_lock = asyncio.Lock()
 
+    def _plan_api_headers(self) -> dict[str, str]:
+        return {
+            "Referer": f"{GAOKAO_WEB_ORIGIN}/",
+            "Origin": GAOKAO_WEB_ORIGIN,
+            "Accept": "application/json,text/plain,*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "User-Agent": self._plan_api_user_agent,
+        }
+
     def configure_sessions(self, manager) -> None:
         manager.add(
             "http",
-            FetcherSession(
-                timeout=30,
-                impersonate="chrome",
-                headers={
-                    "Referer": f"{GAOKAO_WEB_ORIGIN}/",
-                    "Origin": GAOKAO_WEB_ORIGIN,
-                    "Accept": "application/json,text/plain,*/*",
-                    "User-Agent": PLAN_API_USER_AGENT,
-                },
+            _PlanApiThrottleSession(
+                FetcherSession(
+                    timeout=30,
+                    impersonate="chrome",
+                    headers=self._plan_api_headers(),
+                    retries=1,
+                ),
+                self._plan_api_throttle,
             ),
         )
 
     async def is_blocked(self, response: Response) -> bool:
-        if str(response.url).startswith("https://api.zjzw.cn/"):
+        if _is_plan_api_url(str(response.url)):
+            if response.status in BLOCKED_STATUS_CODES:
+                self.concurrent_requests = 1
+                return True
             payload = response_json(response)
             if payload is not None:
                 code = str(payload.get("code", ""))
                 if code == "0000":
-                    self._consecutive_plan_api_limits = 0
+                    async with self._plan_api_backoff_lock:
+                        self._consecutive_plan_api_limits = 0
+                        self._plan_api_cooldown_until = 0.0
+                        self.concurrent_requests = self._plan_api_normal_concurrency
                     return False
                 if code == PLAN_API_RATE_LIMIT_CODE:
+                    # Scrapling 会在下载锁释放后继续调度任务; 限流期间降为单任务, 避免队列继续撞接口。
+                    self.concurrent_requests = 1
                     return True
         return await super().is_blocked(response)
 
     async def retry_blocked_request(self, request: Request, response: Response) -> Request:
+        if not _is_plan_api_url(str(request.url)):
+            request.sid = "http"
+            return request
+
         request.sid = "http"
         async with self._plan_api_backoff_lock:
             self._consecutive_plan_api_limits += 1
@@ -159,20 +234,38 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
             now = loop.time()
             self._plan_api_cooldown_until = max(self._plan_api_cooldown_until, now + backoff)
             cooldown = self._plan_api_cooldown_until - now
-            logger.warning(
-                "招生计划 API 触发限流 url=%s status=%s retry=%d backoff=%.0fs",
-                request.url,
-                response.status,
-                retry_count,
-                cooldown,
-            )
+            await self._plan_api_throttle.extend_cooldown(cooldown)
+            should_pause = retry_count >= PLAN_API_CIRCUIT_BREAKER_LIMIT
+        logger.warning(
+            "招生计划 API 触发限流 url=%s status=%s retry=%d backoff=%.0fs",
+            request.url,
+            response.status,
+            retry_count,
+            cooldown,
+        )
+        if should_pause:
+            logger.error("招生计划 API 连续限流达到阈值, 暂停并保存 checkpoint")
+            try:
+                self.pause()
+            except RuntimeError:
+                logger.debug("当前不在运行中的 Spider, 跳过自动暂停")
+        else:
             await asyncio.sleep(cooldown)
         return request
+
+    async def _make_plan_api_request(self, url: str, meta: dict[str, Any]) -> Request:
+        return Request(
+            url,
+            sid="http",
+            callback=self.parse,
+            meta=meta,
+            headers=self._plan_api_headers(),
+        )
 
     async def start_requests(self):
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, sch_id, name FROM schools ORDER BY id")
+            rows = await conn.fetch("SELECT id, sch_id, gaokao_school_id, name FROM schools ORDER BY id")
 
         provinces = await load_province_targets(pool, self._crawl_config.target_provinces)
         years = _select_plan_years(
@@ -181,7 +274,7 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
             target_start_year=self._crawl_config.target_year_start,
             target_end_year=self._crawl_config.target_year_end,
         )
-        schools = [{"id": int(row["id"]), "sch_id": int(row["sch_id"]), "name": str(row["name"])} for row in rows]
+        schools = _canonicalize_school_rows(rows)
         province_meta = [
             {"id": province.id, "name": province.name, "code": province.url_value} for province in provinces
         ]
@@ -207,7 +300,9 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         for school in response.request.meta.get("schools") or []:
             school_name = _safe_text(school.get("name"))
             lookup_name = _SCHOOL_NAME_ALIASES.get(school_name or "", school_name or "")
-            gaokao_school_id = school_index.get(_normalize_school_name(lookup_name))
+            gaokao_school_id = _safe_text(school.get("gaokao_school_id")) or school_index.get(
+                _normalize_school_name(lookup_name)
+            )
             if not gaokao_school_id:
                 logger.debug("Skipping enrollment plan for unmatched school=%s", school_name)
                 continue
@@ -259,10 +354,9 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
             else:
                 years_to_fetch = allowed_years
             for year in years_to_fetch:
-                yield Request(
+                yield await self._make_plan_api_request(
                     PLAN_URL_TEMPLATE.format(school_id=gaokao_school_id, year=year, province=province_code),
-                    callback=self.parse,
-                    meta={
+                    {
                         "school_id": response.request.meta.get("school_id"),
                         "school_name": response.request.meta.get("school_name"),
                         "gaokao_school_id": gaokao_school_id,
@@ -303,15 +397,14 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
                 and page * 20 < num_found
             ):
                 next_page = page + 1
-                yield Request(
+                yield await self._make_plan_api_request(
                     PLAN_API_PAGE_URL_TEMPLATE.format(
                         school_id=gaokao_school_id,
                         year=year,
                         province=province_code,
                         page=next_page,
                     ),
-                    callback=self.parse,
-                    meta={
+                    {
                         **dict(response.request.meta),
                         "page": next_page,
                     },
@@ -497,6 +590,9 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
                 "year": item["year"],
                 "subject_category_id": item.get("subject_category_id"),
                 "batch": item.get("batch"),
+                "school_code_raw": item.get("school_code_raw"),
+                "major_group_code": item.get("major_group_code"),
+                "major_code_raw": item.get("major_code_raw"),
                 "major_name": item.get("major_name"),
             },
             upsert_fn=upsert_enrollment_plan,
@@ -557,6 +653,56 @@ def _build_gaokao_school_index(rows: Any) -> dict[str, str]:
                 if name and name not in school_index:
                     school_index[name] = school_id
     return school_index
+
+
+def _choose_plan_api_user_agent() -> str:
+    try:
+        return ua_pool.get_ua_for_browser("chrome")
+    except Exception:
+        logger.warning("无法从 UA 池选择 Chrome 标识, 回退到内置标识", exc_info=True)
+        return PLAN_API_USER_AGENT
+
+
+def _canonicalize_school_rows(rows: Any) -> list[dict[str, Any]]:
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for row in rows or []:
+        name = _safe_text(row.get("name"))
+        if not name:
+            continue
+        school = {"id": int(row["id"]), "sch_id": int(row["sch_id"]), "name": name}
+        if row.get("gaokao_school_id") is not None:
+            school["gaokao_school_id"] = str(row["gaokao_school_id"])
+        by_name.setdefault(_normalize_school_name(name), []).append(school)
+
+    canonical: list[dict[str, Any]] = []
+    for group in by_name.values():
+        mapped: dict[str, list[dict[str, Any]]] = {}
+        for school in group:
+            gaokao_school_id = _safe_text(school.get("gaokao_school_id"))
+            if gaokao_school_id:
+                mapped.setdefault(gaokao_school_id, []).append(school)
+        if mapped:
+            for gaokao_school_id, candidates in mapped.items():
+                if len(mapped) == 1:
+                    candidates = [
+                        *candidates,
+                        *[school for school in group if not _safe_text(school.get("gaokao_school_id"))],
+                    ]
+                canonical.append(_choose_canonical_school(candidates, gaokao_school_id))
+        else:
+            canonical.append(_choose_canonical_school(group, None))
+    return sorted(canonical, key=lambda school: int(school["id"]))
+
+
+def _choose_canonical_school(
+    candidates: list[dict[str, Any]],
+    gaokao_school_id: str | None,
+) -> dict[str, Any]:
+    chosen = max(candidates, key=lambda school: (int(school["sch_id"]) > 0, -int(school["id"])))
+    result = dict(chosen)
+    if gaokao_school_id is not None:
+        result["gaokao_school_id"] = gaokao_school_id
+    return result
 
 
 def _normalize_school_name(name: str) -> str:

@@ -12,6 +12,18 @@ IMPERSONATE_LIST: list[str] = [
 ]
 
 BROWSER_TYPES: list[str] = ["chrome", "firefox", "safari", "edge"]
+_FAKE_USERAGENT_BROWSER_NAMES = {
+    "chrome": "Chrome",
+    "firefox": "Firefox",
+    "safari": "Safari",
+    "edge": "Edge",
+}
+_BROWSER_UA_MARKERS = {
+    "chrome": ("Chrome/", "Edg/"),
+    "firefox": ("Firefox/",),
+    "safari": ("Safari/", "Chrome/", "Chromium/"),
+    "edge": ("Edg/",),
+}
 
 
 class UAPool:
@@ -19,7 +31,7 @@ class UAPool:
     and Scrapling impersonate list for TLS fingerprint selection."""
 
     def __init__(self) -> None:
-        self._ua = UserAgent(browsers=BROWSER_TYPES)
+        self._ua = UserAgent(browsers=_FAKE_USERAGENT_BROWSER_NAMES.values(), platforms=["desktop"])
 
     def get_random_ua(self) -> str:
         """Get a random realistic User-Agent string."""
@@ -35,7 +47,12 @@ class UAPool:
         if browser not in BROWSER_TYPES:
             msg = f"Unsupported browser: {browser}. Choose from {BROWSER_TYPES}"
             raise ValueError(msg)
-        return getattr(self._ua, browser)
+        user_agent = self._ua.getBrowser(_FAKE_USERAGENT_BROWSER_NAMES[browser])["useragent"]
+        required_marker, *excluded_markers = _BROWSER_UA_MARKERS[browser]
+        if required_marker not in user_agent or any(marker in user_agent for marker in excluded_markers):
+            msg = f"fake-useragent returned a mismatched {browser} identifier"
+            raise RuntimeError(msg)
+        return user_agent
 
 
 ua_pool = UAPool()
