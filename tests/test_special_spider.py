@@ -142,6 +142,36 @@ def test_parse_detail_extracts_strong_base_structured_fields() -> None:
     assert items[0]["quality_flags"] == []
 
 
+def test_parse_detail_flags_missing_strong_base_structured_fields() -> None:
+    spider = _make_spider()
+    response = _make_response(
+        "<div class='content'><p>未提供报名时间和招生专业。</p></div>",
+        "https://gaokao.chsi.com.cn/gkxx/qjjh/incomplete.html",
+        {
+            "item_data": {
+                "enrollment_type": "强基计划",
+                "province_code": "11",
+                "year": 2025,
+                "title": "测试大学2025年强基计划招生简章",
+                "source_url": "https://gaokao.chsi.com.cn/gkxx/qjjh/incomplete.html",
+            }
+        },
+    )
+
+    with (
+        patch(
+            "gaokao_vault.spiders.special_spider.find_school_by_name",
+            new=AsyncMock(return_value={"id": 10001}),
+        ),
+        patch.object(spider, "_get_pool", new=AsyncMock(return_value=_FakePool(AsyncMock()))),
+        patch.object(spider, "process_item", new=AsyncMock(return_value="new")),
+    ):
+        items = asyncio.run(_collect(spider.parse_detail(response)))
+
+    assert "missing_registration_window" in items[0]["quality_flags"]
+    assert "missing_eligible_majors" in items[0]["quality_flags"]
+
+
 def test_parse_dxsbb_list_yields_special_article_requests() -> None:
     spider = _make_spider()
     response = _make_response(

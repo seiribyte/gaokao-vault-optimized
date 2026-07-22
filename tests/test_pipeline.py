@@ -17,6 +17,7 @@ from gaokao_vault.pipeline.dedup import (
     deduplicate_score_segment_batch,
 )
 from gaokao_vault.pipeline.hasher import compute_content_hash
+from gaokao_vault.pipeline.quality import missing_field_flags
 from gaokao_vault.pipeline.validator import validate_item
 
 
@@ -41,6 +42,17 @@ class TestContentHash:
         item1 = {"name": "Test", "sch_id": 1, "city": "Beijing"}
         item2 = {"city": "Beijing", "sch_id": 1, "name": "Test"}
         assert compute_content_hash(item1) == compute_content_hash(item2)
+
+
+def test_missing_field_flags_handles_empty_structures_without_flagging_falsy_scalars() -> None:
+    data = {
+        "registration_window": {},
+        "eligible_majors": [],
+        "plan_count": 0,
+        "enabled": False,
+    }
+
+    assert missing_field_flags(data, tuple(data)) == ["missing_registration_window", "missing_eligible_majors"]
 
 
 class TestValidator:
