@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from gaokao_vault.config import CrawlConfig, DatabaseConfig, ProxyConfig, ScheduleConfig
 from gaokao_vault.constants import BASE_URL, META_FIELDS, PHASE2_TYPES, PHASE3_TYPES, TaskType
 
@@ -27,6 +29,21 @@ class TestConfig:
     def test_crawl_config_target_year_overrides_default_lower_bound(self):
         config = CrawlConfig(year_start=2015, target_year_start=2024)
         assert config.effective_year_start == 2024
+
+    def test_env_example_matches_crawl_defaults(self):
+        values = {
+            key: value
+            for line in Path(".env.example").read_text(encoding="utf-8").splitlines()
+            if line and not line.startswith("#")
+            for key, value in [line.split("=", 1)]
+        }
+        config = CrawlConfig()
+
+        assert int(values["GAOKAO_CRAWL__CONCURRENCY"]) == config.concurrency
+        assert float(values["GAOKAO_CRAWL__BASE_DELAY"]) == config.base_delay
+        assert int(values["GAOKAO_CRAWL__BATCH_SIZE"]) == config.batch_size
+        assert int(values["GAOKAO_CRAWL__YEAR_START"]) == config.year_start
+        assert int(values["GAOKAO_CRAWL__SPIDER_TIMEOUT"]) == config.spider_timeout
 
     def test_crawl_config_accepts_school_major_readiness_threshold_env(self, monkeypatch):
         monkeypatch.setenv("GAOKAO_CRAWL__SCHOOL_MAJOR_MIN_READY_SCHOOLS", "2800")
