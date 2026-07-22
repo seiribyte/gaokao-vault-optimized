@@ -227,3 +227,12 @@ def test_admission_records_view_appends_min_rank_provenance_to_preserve_existing
     assert schema_sql.find("mar.min_rank, mar.plan_count") < schema_sql.find(
         "mar.min_rank_source, mar.min_rank_is_derived"
     )
+
+
+def test_score_segments_use_null_safe_unique_identity_and_cleanup_duplicates() -> None:
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+
+    assert "DROP CONSTRAINT IF EXISTS score_segments_province_id_year_subject_category_id_score_key" in schema_sql
+    assert "PARTITION BY province_id, year, subject_category_id, score" in schema_sql
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_score_segments_unique_key" in schema_sql
+    assert "ON score_segments(province_id, year, subject_category_id, score) NULLS NOT DISTINCT" in schema_sql

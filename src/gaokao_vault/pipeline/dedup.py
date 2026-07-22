@@ -7,6 +7,7 @@ from typing import Any
 import asyncpg
 
 from gaokao_vault.db.queries.crawl_meta import find_latest_hash, insert_snapshot
+from gaokao_vault.db.queries.scores import upsert_score_segment
 
 UpsertFn = Callable[[asyncpg.Connection, dict[str, Any]], Awaitable[int]]
 
@@ -28,6 +29,11 @@ TABLE_MAP: dict[str, tuple[str, str, list[str]]] = {
         "admission_score_lines",
         "province_id = $1 AND year = $2 AND subject_category_id = $3 AND batch = $4 AND special_name IS NOT DISTINCT FROM $5",
         ["province_id", "year", "subject_category_id", "batch", "special_name"],
+    ),
+    "score_segments": (
+        "score_segments",
+        "province_id = $1 AND year = $2 AND subject_category_id IS NOT DISTINCT FROM $3 AND score = $4",
+        ["province_id", "year", "subject_category_id", "score"],
     ),
     "charters": ("admission_charters", "school_id = $1 AND year = $2", ["school_id", "year"]),
     "timelines": (
@@ -148,6 +154,52 @@ async def deduplicate_and_persist(
             snapshot_data=_serialize_snapshot(old_data),
         )
         return "updated"
+
+
+async def deduplicate_score_segment_batch(
+    conn: asyncpg.Connection,
+    rows: list[dict[str, Any]],
+    crawl_task_id: int,
+) -> dict[str, int]:
+    """Persist one score-segment batch atomically with three-state snapshots."""
+    counts = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
+    mapping = TABLE_MAP["score_segments"]
+    async with conn.transaction():
+        for item in rows:
+            content_hash = item["content_hash"]
+            params = [item[key] for key in mapping[2]]
+            existing_id, existing_hash = await find_latest_hash(conn, mapping[0], mapping[1], params)
+            item["crawl_task_id"] = crawl_task_id
+
+            if existing_id is None:
+                entity_id = await upsert_score_segment(conn, item)
+                change_type = "new"
+                previous_hash = None
+                snapshot_data = None
+            elif existing_hash == content_hash:
+                entity_id = existing_id
+                change_type = "unchanged"
+                previous_hash = None
+                snapshot_data = None
+            else:
+                old_row = await conn.fetchrow(f"SELECT * FROM {mapping[0]} WHERE id = $1", existing_id)  # noqa: S608
+                entity_id = await upsert_score_segment(conn, item)
+                change_type = "updated"
+                previous_hash = existing_hash
+                snapshot_data = dict(old_row) if old_row else None
+
+            await insert_snapshot(
+                conn,
+                crawl_task_id,
+                "score_segments",
+                entity_id,
+                content_hash,
+                change_type,
+                previous_hash=previous_hash,
+                snapshot_data=snapshot_data,
+            )
+            counts[change_type] += 1
+    return counts
 
 
 async def _persist_new(conn: asyncpg.Connection, item: dict[str, Any], upsert_fn: UpsertFn | None) -> int | None:

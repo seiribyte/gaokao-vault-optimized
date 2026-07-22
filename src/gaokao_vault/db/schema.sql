@@ -404,6 +404,22 @@ CREATE TABLE IF NOT EXISTS score_segments (
     UNIQUE(province_id, year, subject_category_id, score)
 );
 
+ALTER TABLE score_segments
+    DROP CONSTRAINT IF EXISTS score_segments_province_id_year_subject_category_id_score_key;
+WITH ranked_score_segments AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+               PARTITION BY province_id, year, subject_category_id, score
+               ORDER BY updated_at DESC, id DESC
+           ) AS row_number
+    FROM score_segments
+)
+DELETE FROM score_segments AS current_row
+USING ranked_score_segments AS ranked
+WHERE current_row.id = ranked.id AND ranked.row_number > 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_score_segments_unique_key
+    ON score_segments(province_id, year, subject_category_id, score) NULLS NOT DISTINCT;
+
 CREATE INDEX IF NOT EXISTS idx_segments_province_year ON score_segments(province_id, year, subject_category_id);
 CREATE INDEX IF NOT EXISTS idx_segments_score ON score_segments(province_id, year, subject_category_id, score);
 

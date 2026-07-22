@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from conftest import make_mock_pool_and_conn
 
 from gaokao_vault.models.school import SchoolItem
 from gaokao_vault.models.score import ScoreLineItem
-from gaokao_vault.pipeline.dedup import deduplicate_and_persist
+from gaokao_vault.pipeline.dedup import deduplicate_and_persist, deduplicate_score_segment_batch
 from gaokao_vault.pipeline.hasher import compute_content_hash
 from gaokao_vault.pipeline.validator import validate_item
 
@@ -120,3 +120,39 @@ class TestDedupPersistence:
         )
 
         assert result == "failed"
+
+    def test_score_segment_batch_records_three_state_snapshots_in_one_transaction(self):
+        _, conn, transaction_context = make_mock_pool_and_conn()
+        rows = [
+            {
+                "province_id": 7,
+                "year": 2025,
+                "subject_category_id": None,
+                "score": score,
+                "segment_count": 1,
+                "cumulative_count": 1,
+                "content_hash": content_hash,
+            }
+            for score, content_hash in [(600, "new-hash"), (599, "same-hash"), (598, "changed-hash")]
+        ]
+
+        with (
+            patch(
+                "gaokao_vault.pipeline.dedup.find_latest_hash",
+                new=AsyncMock(side_effect=[(None, None), (22, "same-hash"), (23, "old-hash")]),
+            ),
+            patch(
+                "gaokao_vault.pipeline.dedup.upsert_score_segment",
+                new=AsyncMock(side_effect=[21, 23]),
+            ) as upsert,
+            patch("gaokao_vault.pipeline.dedup.insert_snapshot", new=AsyncMock(return_value=1)) as snapshot,
+        ):
+            conn.fetchrow.return_value = {"id": 23, "content_hash": "old-hash", "score": 598}
+            counts = asyncio.run(deduplicate_score_segment_batch(conn, rows, crawl_task_id=99))
+
+        assert counts == {"new": 1, "updated": 1, "unchanged": 1, "failed": 0}
+        assert upsert.await_count == 2
+        assert [call.args[5] for call in snapshot.await_args_list] == ["new", "unchanged", "updated"]
+        assert all(row["crawl_task_id"] == 99 for row in rows)
+        transaction_context.__aenter__.assert_awaited_once_with()
+        transaction_context.__aexit__.assert_awaited_once()
