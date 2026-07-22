@@ -48,6 +48,7 @@ class ProvincialAnnouncementSpider(BaseGaokaoSpider):
 
     def configure_sessions(self, manager) -> None:
         manager.add("http", FetcherSession())
+        self._add_stealth_session(manager)
 
     async def start_requests(self):
         for source_key, source in PROVINCIAL_ANNOUNCEMENT_SOURCES.items():

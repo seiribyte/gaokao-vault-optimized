@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+from scrapling.spiders import Request, SessionManager
+
+from gaokao_vault.config import DatabaseConfig
 from gaokao_vault.constants import TaskType
 from gaokao_vault.scheduler.orchestrator import SPIDER_MAP
 from gaokao_vault.spiders import (
@@ -29,6 +32,35 @@ from gaokao_vault.spiders.provincial_announcement_spider import ProvincialAnnoun
 
 
 class TestSpiderStructure:
+    def test_session_overrides_register_blocked_retry_target(self):
+        db_config = DatabaseConfig(
+            dsn="postgresql://test:test@localhost:5432/test_db",
+            pool_min=1,
+            pool_max=2,
+        )
+        spider_types = (
+            DxsbbAdmissionResultSpider,
+            ScoreSegmentSpider,
+            SpecialSpider,
+            TimelineSpider,
+            ProvincialAnnouncementSpider,
+        )
+
+        async def exercise() -> None:
+            for spider_type in spider_types:
+                spider = spider_type(db_config=db_config, crawl_task_id=1)
+                manager = SessionManager()
+                spider.configure_sessions(manager)
+                request = Request("https://example.invalid", sid="http")
+                retried = await spider.retry_blocked_request(request, MagicMock(status=403))
+
+                assert manager.get(retried.sid) is manager.get("stealth")
+                manager.remove("http")
+                manager.remove("stealth")
+
+        with patch("gaokao_vault.spiders.base.get_proxy_rotator", return_value=None):
+            asyncio.run(exercise())
+
     def test_on_error_increments_failed_stats(self):
         spider = object.__new__(BaseGaokaoSpider)
         spider._stats = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}

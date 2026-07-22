@@ -42,6 +42,7 @@ class DxsbbAdmissionResultSpider(BaseGaokaoSpider):
 
     def configure_sessions(self, manager) -> None:
         manager.add("http", FetcherSession())
+        self._add_stealth_session(manager)
 
     async def start_requests(self):
         yield Request(DXSBB_ADMISSION_LIST_URL, callback=self.parse_list)

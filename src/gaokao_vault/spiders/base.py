@@ -158,6 +158,9 @@ class BaseGaokaoSpider(Spider):
                 proxy_rotator=rotator,
             ),
         )
+        self._add_stealth_session(manager, rotator=rotator)
+
+    def _add_stealth_session(self, manager, *, rotator=None) -> None:
         manager.add(
             "stealth",
             AsyncStealthySession(
@@ -171,7 +174,7 @@ class BaseGaokaoSpider(Spider):
                 extra_headers={"Referer": "https://gaokao.chsi.com.cn/"},
                 additional_args={"viewport": {"width": 1366, "height": 768}},
                 impersonate=cast(Any, IMPERSONATE_LIST),
-                proxy_rotator=rotator,
+                proxy_rotator=rotator if rotator is not None else get_proxy_rotator(),
             ),
             lazy=True,
         )

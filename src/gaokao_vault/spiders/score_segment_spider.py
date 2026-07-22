@@ -76,6 +76,7 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
                 },
             ),
         )
+        self._add_stealth_session(manager)
 
     async def on_start(self, resuming: bool = False):
         pool = await self._get_pool()
