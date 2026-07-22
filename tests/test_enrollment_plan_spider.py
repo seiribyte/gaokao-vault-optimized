@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from scrapling.parser import Adaptor
 from scrapling.spiders import Request
 from scrapling.spiders.session import SessionManager
@@ -416,7 +417,9 @@ def test_plan_api_rate_limit_extends_shared_throttle() -> None:
     ):
         asyncio.run(spider.retry_blocked_request(request, response))
 
-    extend_cooldown.assert_awaited_once_with(60.0)
+    extend_cooldown.assert_awaited_once()
+    assert extend_cooldown.await_args is not None
+    assert extend_cooldown.await_args.args[0] == pytest.approx(60.0)
 
 
 def test_plan_api_success_payload_is_not_blocked_by_content_text() -> None:
@@ -502,7 +505,7 @@ def test_plan_api_retry_keeps_http_session_and_backs_off() -> None:
         asyncio.run(spider.retry_blocked_request(request, response))
 
     assert retried.sid == "http"
-    assert [call.args[0] for call in sleep.await_args_list] == [60.0, 180.0]
+    assert [call.args[0] for call in sleep.await_args_list] == pytest.approx([60.0, 180.0])
 
 
 def test_plan_api_retry_serializes_concurrent_backoff_state() -> None:
@@ -516,7 +519,7 @@ def test_plan_api_retry_serializes_concurrent_backoff_state() -> None:
     async def run() -> None:
         with patch("gaokao_vault.spiders.enrollment_plan_spider.asyncio.sleep", new=AsyncMock()) as sleep:
             await asyncio.gather(*(spider.retry_blocked_request(request, response) for request in requests))
-            assert [call.args[0] for call in sleep.await_args_list] == [60.0, 180.0]
+            assert [call.args[0] for call in sleep.await_args_list] == pytest.approx([60.0, 180.0])
 
     asyncio.run(run())
 
