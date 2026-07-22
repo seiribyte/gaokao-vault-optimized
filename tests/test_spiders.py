@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import MagicMock, patch
+
+from scrapling.spiders import Request, SessionManager
+
+from gaokao_vault.config import AppConfig, CrawlConfig, DatabaseConfig, ProxyConfig
 from gaokao_vault.constants import TaskType
 from gaokao_vault.scheduler.orchestrator import SPIDER_MAP
 from gaokao_vault.spiders import (
@@ -26,6 +32,70 @@ from gaokao_vault.spiders.provincial_announcement_spider import ProvincialAnnoun
 
 
 class TestSpiderStructure:
+    def test_explicit_retry_and_proxy_config_are_applied_before_sessions(self):
+        crawl_config = CrawlConfig(max_blocked_retries=9, concurrency=4, base_delay=0.25)
+        app_config = AppConfig(proxy=ProxyConfig(static_proxies=["http://proxy.invalid:8080"], use_freeproxy=False))
+        diagnostics = {
+            "total_count": 1,
+            "use_freeproxy": False,
+            "paid_count": 1,
+            "free_count": 0,
+            "sample_proxies": ["http://proxy.invalid:8080"],
+        }
+
+        with (
+            patch("gaokao_vault.spiders.base.get_proxy_rotator", return_value=None) as get_rotator,
+            patch("gaokao_vault.spiders.base.get_proxy_diagnostics", return_value=diagnostics),
+        ):
+            spider = BaseGaokaoSpider(
+                db_config=DatabaseConfig(),
+                crawl_task_id=1,
+                config=crawl_config,
+                app_config=app_config,
+            )
+
+        assert spider.max_blocked_retries == 9
+        assert spider.concurrent_requests == 4
+        assert spider.download_delay == 0.25
+        get_rotator.assert_called_with(app_config.proxy)
+
+    def test_session_overrides_register_blocked_retry_target(self):
+        db_config = DatabaseConfig(
+            dsn="postgresql://test:test@localhost:5432/test_db",
+            pool_min=1,
+            pool_max=2,
+        )
+        spider_types = (
+            DxsbbAdmissionResultSpider,
+            ScoreSegmentSpider,
+            SpecialSpider,
+            TimelineSpider,
+            ProvincialAnnouncementSpider,
+        )
+
+        async def exercise() -> None:
+            for spider_type in spider_types:
+                spider = spider_type(db_config=db_config, crawl_task_id=1)
+                manager = SessionManager()
+                spider.configure_sessions(manager)
+                request = Request("https://example.invalid", sid="http")
+                retried = await spider.retry_blocked_request(request, MagicMock(status=403))
+
+                assert manager.get(retried.sid) is manager.get("stealth")
+                manager.remove("http")
+                manager.remove("stealth")
+
+        with patch("gaokao_vault.spiders.base.get_proxy_rotator", return_value=None):
+            asyncio.run(exercise())
+
+    def test_on_error_increments_failed_stats(self):
+        spider = object.__new__(BaseGaokaoSpider)
+        spider._stats = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
+
+        asyncio.run(spider.on_error(MagicMock(url="https://example.invalid"), RuntimeError("boom")))
+
+        assert spider._stats["failed"] == 1
+
     def test_all_spiders_have_name(self):
         spiders = [
             SchoolSpider,

@@ -34,7 +34,7 @@ src/gaokao_vault/
 ├── db/
 │   ├── connection.py       # asyncpg 连接池
 │   ├── migrate.py          # schema 初始化 + seed
-│   ├── schema.sql          # 18 张表 DDL
+│   ├── schema.sql          # 24 张表 DDL
 │   ├── seed_*.sql          # 种子数据
 │   └── queries/            # 各表 CRUD
 ├── anti_detect/
@@ -52,7 +52,7 @@ src/gaokao_vault/
 ├── models/                 # Pydantic 数据模型
 ├── spiders/
 │   ├── base.py             # BaseGaokaoSpider 基类
-│   └── *_spider.py         # 13 个 Spider 实现
+│   └── *_spider.py         # 16 个 Spider 实现
 └── scheduler/
     ├── orchestrator.py     # 三阶段编排
     └── task_manager.py     # crawl_tasks 生命周期
@@ -94,7 +94,7 @@ src/gaokao_vault/
 
 ## 数据库
 
-18 张表，分四层：
+24 张表，分四层：
 
 - 抓取元数据层：`crawl_tasks`, `crawl_snapshots`
 - 维度层：`provinces`, `subject_categories`

@@ -271,7 +271,7 @@ class EnrollmentPlanSpider(BaseGaokaoSpider):
         years = _select_plan_years(
             self.mode,
             datetime.now(),
-            target_start_year=self._crawl_config.target_year_start,
+            target_start_year=self._crawl_config.effective_year_start,
             target_end_year=self._crawl_config.target_year_end,
         )
         schools = _canonicalize_school_rows(rows)

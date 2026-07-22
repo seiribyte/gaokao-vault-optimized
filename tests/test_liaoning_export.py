@@ -27,6 +27,7 @@ def _plan(**overrides) -> dict:
         "authority": "教育部",
         "school_level": "本科",
         "school_type": "综合",
+        "school_crawl_task_id": 1,
         "is_211": True,
         "is_985": True,
         "is_double_first": True,
@@ -372,3 +373,74 @@ def test_history_matching_leaves_ambiguous_variants_blank() -> None:
     assert rows[0][19] == "新增"
     assert matched_counts[2025] == 0
     assert new_count == 1
+
+
+def test_history_matching_survives_major_id_change_with_same_source_identity() -> None:
+    plan = _plan(major_id=10, major_code_raw="04", major_full_name="计算机科学与技术(拔尖班)")
+    admission = _admission(
+        major_id=99,
+        major_code_raw="04",
+        major_name_raw="计算机科学与技术(拔尖班)",
+        min_score=688,
+    )
+
+    rows, matched_counts, _new_count = build_liaoning_export_rows(
+        [plan],
+        [admission],
+        [],
+        [],
+        plan_year=2026,
+    )
+
+    assert rows[0][21] == 688
+    assert matched_counts[2025] == 1
+
+
+def test_history_matching_does_not_treat_plain_major_as_named_variant() -> None:
+    plan = _plan(major_code_raw=None, major_full_name="计算机科学与技术(中外合作办学)")
+    admission = _admission(major_code_raw=None, major_name_raw="计算机科学与技术(普通班)")
+
+    rows, matched_counts, new_count = build_liaoning_export_rows(
+        [plan],
+        [admission],
+        [],
+        [],
+        plan_year=2026,
+    )
+
+    assert rows[0][20:25] == [None] * 5
+    assert rows[0][19] == "新增"
+    assert matched_counts[2025] == 0
+    assert new_count == 1
+
+
+def test_merge_baseline_subject_filter_drops_other_subject_rows() -> None:
+    generated_rows, _, _ = build_liaoning_export_rows(
+        [_plan(subject_category="物理类")],
+        [],
+        [],
+        [],
+        plan_year=2026,
+    )
+    physics = list(generated_rows[0])
+    history = list(physics)
+    history[0] = "history"
+    history[4] = "历史"
+
+    rows, _, _ = merge_liaoning_baseline_rows(
+        generated_rows,
+        [physics, history],
+        plan_year=2026,
+        subject="物理",
+    )
+
+    assert len(rows) == 1
+    assert rows[0][4] == "物理"
+
+
+def test_unknown_school_ownership_is_left_blank() -> None:
+    plan = _plan(school_crawl_task_id=None, is_private=False, is_independent=False, is_sino_foreign=False)
+
+    rows, _, _ = build_liaoning_export_rows([plan], [], [], [], plan_year=2026)
+
+    assert rows[0][48] is None

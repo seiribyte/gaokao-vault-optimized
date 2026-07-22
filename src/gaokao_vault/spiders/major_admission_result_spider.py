@@ -166,14 +166,14 @@ class MajorAdmissionResultSpider(BaseGaokaoSpider):
             return
 
         async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, sch_id FROM schools ORDER BY id")
+            rows = await conn.fetch("SELECT id, sch_id FROM schools WHERE sch_id > 0 ORDER BY id")
 
         provinces = await load_province_targets(pool, self._crawl_config.target_provinces)
         years = iter_crawl_years(
             mode=self.mode,
             full_start_year=_YEAR_START,
             current_year=_YEAR_END,
-            target_start_year=self._crawl_config.target_year_start,
+            target_start_year=self._crawl_config.effective_year_start,
             target_end_year=self._crawl_config.target_year_end,
         )
 
@@ -316,6 +316,10 @@ class MajorAdmissionResultSpider(BaseGaokaoSpider):
                                 "year": year,
                                 "subject_category_id": subject_category_id,
                                 "batch": batch_raw,
+                                "school_code_raw": data.get("school_code_raw"),
+                                "major_group_code": data.get("major_group_code"),
+                                "major_code_raw": data.get("major_code_raw"),
+                                "major_name_raw": data.get("major_name_raw"),
                             },
                             upsert_fn=upsert_major_admission_result,
                         )

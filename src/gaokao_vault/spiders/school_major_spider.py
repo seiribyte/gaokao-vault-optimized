@@ -72,7 +72,7 @@ class SchoolMajorSpider(BaseGaokaoSpider):
 
     async def _upstream_table_counts(self) -> tuple[int, int]:
         async with (await self._get_pool()).acquire() as conn:
-            school_count = await conn.fetchval("SELECT COUNT(*) FROM schools")
+            school_count = await conn.fetchval("SELECT COUNT(*) FROM schools WHERE sch_id > 0")
             major_count = await conn.fetchval("SELECT COUNT(*) FROM majors")
         return int(school_count or 0), int(major_count or 0)
 
@@ -220,7 +220,7 @@ class SchoolMajorSpider(BaseGaokaoSpider):
         self._allow_name_fallback = majors_stable
 
         async with (await self._get_pool()).acquire() as conn:
-            rows = await conn.fetch("SELECT id, sch_id FROM schools ORDER BY id")
+            rows = await conn.fetch("SELECT id, sch_id FROM schools WHERE sch_id > 0 ORDER BY id")
 
         for row in rows:
             school_id = row["id"]

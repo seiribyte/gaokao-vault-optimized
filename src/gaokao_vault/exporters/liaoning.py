@@ -144,6 +144,7 @@ async def export_liaoning_workbook(
             rows,
             baseline_rows,
             plan_year=plan_year,
+            subject=subject,
         )
     await asyncio.to_thread(write_liaoning_workbook, output_path, rows, plan_year=plan_year)
     return ExportSummary(
@@ -181,10 +182,7 @@ def build_liaoning_export_rows(
             if match is not None:
                 matched_counts[year] += 1
 
-        is_new = all(
-            matches[year] is None and historical_plan_matches[year] is None
-            for year in history_years
-        )
+        is_new = all(matches[year] is None and historical_plan_matches[year] is None for year in history_years)
         if is_new:
             new_count += 1
 
@@ -286,7 +284,13 @@ def merge_liaoning_baseline_rows(
     baseline_rows: Sequence[list[Any]],
     *,
     plan_year: int,
+    subject: str | None = None,
 ) -> tuple[list[list[Any]], dict[int, int], int]:
+    subject_label = _subject_label(subject)
+    if subject_label:
+        generated_rows = [row for row in generated_rows if len(row) > 4 and _subject_label(row[4]) == subject_label]
+        baseline_rows = [row for row in baseline_rows if len(row) > 4 and _subject_label(row[4]) == subject_label]
+
     exact_index: dict[tuple[str, ...], list[int]] = defaultdict(list)
     name_index: dict[tuple[str, ...], list[int]] = defaultdict(list)
     for index, row in enumerate(baseline_rows):
@@ -371,15 +375,17 @@ def _match_history_row(
     by_id, by_name = indexes
     subject = _subject_label(plan.get("subject_category"))
     school_id = int(plan["school_id"])
-    candidates: list[dict[str, Any]] = []
+    major_name = _normalized_major_name(plan.get("canonical_major_name") or plan.get("major_full_name"))
+    name_candidates = by_name.get((year, school_id, major_name, subject), []) if major_name else []
     major_id = plan.get("major_id")
-    if major_id is not None:
-        candidates = by_id.get((year, school_id, int(major_id), subject), [])
-        if not candidates:
-            return None
-    else:
-        major_name = _normalized_major_name(plan.get("canonical_major_name") or plan.get("major_full_name"))
-        candidates = by_name.get((year, school_id, major_name, subject), [])
+    id_candidates = by_id.get((year, school_id, int(major_id), subject), []) if major_id is not None else []
+    candidates = [*name_candidates]
+    candidates.extend(candidate for candidate in id_candidates if candidate not in candidates)
+    candidates = [candidate for candidate in candidates if _history_identity_compatible(plan, candidate)]
+    if not candidates:
+        return None
+
+    if major_id is None:
         candidate_major_ids = {
             candidate.get("major_id") for candidate in candidates if candidate.get("major_id") is not None
         }
@@ -396,6 +402,56 @@ def _match_history_row(
     if _has_ambiguous_variants(candidates):
         return None
     return max(candidates, key=lambda candidate: (_row_completeness(candidate), _source_priority(candidate)))
+
+
+def _history_identity_compatible(plan: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    plan_major_id = plan.get("major_id")
+    candidate_major_id = candidate.get("major_id")
+    if plan_major_id is not None and candidate_major_id is not None and int(plan_major_id) != int(candidate_major_id):
+        plan_full_name = _normalized_full_major_name(plan.get("major_full_name") or plan.get("major_name"))
+        candidate_full_name = _normalized_full_major_name(
+            candidate.get("major_name_raw") or candidate.get("major_name")
+        )
+        plan_major_code = _normalized_code(plan.get("major_code_raw"))
+        candidate_major_code = _normalized_code(candidate.get("major_code_raw"))
+        major_code_matches = bool(plan_major_code and candidate_major_code and plan_major_code == candidate_major_code)
+        full_name_matches = bool(plan_full_name and candidate_full_name and plan_full_name == candidate_full_name)
+        if not major_code_matches and not full_name_matches:
+            return False
+
+    plan_codes = {
+        field: _normalized_code(plan.get(field)) for field in ("school_code_raw", "major_group_code", "major_code_raw")
+    }
+    for field, plan_value in plan_codes.items():
+        candidate_value = _normalized_code(candidate.get(field))
+        if plan_value and candidate_value and plan_value != candidate_value:
+            return False
+
+    plan_name = plan.get("major_full_name") or plan.get("major_name")
+    candidate_name = candidate.get("major_name_raw") or candidate.get("major_name")
+    plan_base_name = _normalized_major_name(plan_name)
+    candidate_base_name = _normalized_major_name(candidate_name)
+    if plan_base_name and candidate_base_name and plan_base_name != candidate_base_name:
+        return False
+
+    plan_full_name = _normalized_full_major_name(plan_name)
+    candidate_full_name = _normalized_full_major_name(candidate_name)
+    plan_major_code = _normalized_code(plan.get("major_code_raw"))
+    candidate_major_code = _normalized_code(candidate.get("major_code_raw"))
+    major_code_matches = bool(plan_major_code and candidate_major_code and plan_major_code == candidate_major_code)
+    return not (
+        plan_full_name
+        and candidate_full_name
+        and _has_major_variant(plan_name)
+        and _has_major_variant(candidate_name)
+        and plan_full_name != candidate_full_name
+        and not major_code_matches
+    )
+
+
+def _has_major_variant(value: Any) -> bool:
+    text = _clean_text(value)
+    return bool(text and _normalized_full_major_name(text) != _normalized_full_major_name(_base_major_name(text)))
 
 
 def _prefer_exact_variant(
@@ -589,12 +645,14 @@ def _school_tags(plan: dict[str, Any]) -> str | None:
     return "/".join(tags) or None
 
 
-def _ownership_type(plan: dict[str, Any]) -> str:
+def _ownership_type(plan: dict[str, Any]) -> str | None:
     if plan.get("is_sino_foreign"):
         return "中外合作办学"
     if plan.get("is_private") or plan.get("is_independent"):
         return "民办"
-    return "公办"
+    if plan.get("school_crawl_task_id") is not None:
+        return "公办"
+    return None
 
 
 def _strength_label(evidence: Any, tier: Any) -> str | None:

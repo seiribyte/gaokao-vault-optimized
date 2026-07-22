@@ -7,6 +7,7 @@ from typing import Any
 import asyncpg
 
 from gaokao_vault.db.queries.crawl_meta import find_latest_hash, insert_snapshot
+from gaokao_vault.db.queries.scores import upsert_score_segment
 
 UpsertFn = Callable[[asyncpg.Connection, dict[str, Any]], Awaitable[int]]
 
@@ -26,8 +27,14 @@ TABLE_MAP: dict[str, tuple[str, str, list[str]]] = {
     "major_satisfaction": ("major_satisfaction", "major_id = $1 AND school_id = $2", ["major_id", "school_id"]),
     "score_lines": (
         "admission_score_lines",
-        "province_id = $1 AND year = $2 AND subject_category_id = $3 AND batch = $4 AND special_name IS NOT DISTINCT FROM $5",
+        "province_id = $1 AND year = $2 AND subject_category_id IS NOT DISTINCT FROM $3 "
+        "AND batch = $4 AND special_name IS NOT DISTINCT FROM $5",
         ["province_id", "year", "subject_category_id", "batch", "special_name"],
+    ),
+    "score_segments": (
+        "score_segments",
+        "province_id = $1 AND year = $2 AND subject_category_id IS NOT DISTINCT FROM $3 AND score = $4",
+        ["province_id", "year", "subject_category_id", "score"],
     ),
     "charters": ("admission_charters", "school_id = $1 AND year = $2", ["school_id", "year"]),
     "timelines": (
@@ -39,14 +46,43 @@ TABLE_MAP: dict[str, tuple[str, str, list[str]]] = {
         "enrollment_plans",
         "school_id = $1 AND province_id = $2 AND year = $3 "
         "AND subject_category_id IS NOT DISTINCT FROM $4 "
-        "AND batch IS NOT DISTINCT FROM $5 AND major_name IS NOT DISTINCT FROM $6",
-        ["school_id", "province_id", "year", "subject_category_id", "batch", "major_name"],
+        "AND batch IS NOT DISTINCT FROM $5 "
+        "AND school_code_raw IS NOT DISTINCT FROM $6 "
+        "AND major_group_code IS NOT DISTINCT FROM $7 "
+        "AND major_code_raw IS NOT DISTINCT FROM $8 "
+        "AND major_name IS NOT DISTINCT FROM $9",
+        [
+            "school_id",
+            "province_id",
+            "year",
+            "subject_category_id",
+            "batch",
+            "school_code_raw",
+            "major_group_code",
+            "major_code_raw",
+            "major_name",
+        ],
     ),
     "major_admission_results": (
         "major_admission_results",
         "school_id = $1 AND major_id = $2 AND province_id = $3 AND year = $4 "
-        "AND subject_category_id IS NOT DISTINCT FROM $5 AND batch = $6",
-        ["school_id", "major_id", "province_id", "year", "subject_category_id", "batch"],
+        "AND subject_category_id IS NOT DISTINCT FROM $5 AND batch = $6 "
+        "AND school_code_raw IS NOT DISTINCT FROM $7 "
+        "AND major_group_code IS NOT DISTINCT FROM $8 "
+        "AND major_code_raw IS NOT DISTINCT FROM $9 "
+        "AND major_name_raw IS NOT DISTINCT FROM $10",
+        [
+            "school_id",
+            "major_id",
+            "province_id",
+            "year",
+            "subject_category_id",
+            "batch",
+            "school_code_raw",
+            "major_group_code",
+            "major_code_raw",
+            "major_name_raw",
+        ],
     ),
     "special_enrollments": (
         "special_enrollments",
@@ -81,7 +117,33 @@ async def deduplicate_and_persist(
     if mapping is None and upsert_fn is None:
         return "failed"
 
-    async with db_pool.acquire() as conn, conn.transaction():
+    async with db_pool.acquire() as conn:
+        return await deduplicate_and_persist_on_connection(
+            conn,
+            entity_type=entity_type,
+            item=item,
+            content_hash=content_hash,
+            unique_keys=unique_keys,
+            crawl_task_id=crawl_task_id,
+            upsert_fn=upsert_fn,
+        )
+
+
+async def deduplicate_and_persist_on_connection(
+    conn: asyncpg.Connection,
+    entity_type: str,
+    item: dict[str, Any],
+    content_hash: str,
+    unique_keys: dict[str, Any],
+    crawl_task_id: int,
+    upsert_fn: UpsertFn | None = None,
+) -> str:
+    """Run canonical deduplication when the caller already owns a connection."""
+    mapping = TABLE_MAP.get(entity_type)
+    if mapping is None and upsert_fn is None:
+        return "failed"
+
+    async with conn.transaction():
         if mapping:
             table, clause, key_fields = mapping
             params = [unique_keys[k] for k in key_fields]
@@ -119,6 +181,52 @@ async def deduplicate_and_persist(
             snapshot_data=_serialize_snapshot(old_data),
         )
         return "updated"
+
+
+async def deduplicate_score_segment_batch(
+    conn: asyncpg.Connection,
+    rows: list[dict[str, Any]],
+    crawl_task_id: int,
+) -> dict[str, int]:
+    """Persist one score-segment batch atomically with three-state snapshots."""
+    counts = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
+    mapping = TABLE_MAP["score_segments"]
+    async with conn.transaction():
+        for item in rows:
+            content_hash = item["content_hash"]
+            params = [item[key] for key in mapping[2]]
+            existing_id, existing_hash = await find_latest_hash(conn, mapping[0], mapping[1], params)
+            item["crawl_task_id"] = crawl_task_id
+
+            if existing_id is None:
+                entity_id = await upsert_score_segment(conn, item)
+                change_type = "new"
+                previous_hash = None
+                snapshot_data = None
+            elif existing_hash == content_hash:
+                entity_id = existing_id
+                change_type = "unchanged"
+                previous_hash = None
+                snapshot_data = None
+            else:
+                old_row = await conn.fetchrow(f"SELECT * FROM {mapping[0]} WHERE id = $1", existing_id)  # noqa: S608
+                entity_id = await upsert_score_segment(conn, item)
+                change_type = "updated"
+                previous_hash = existing_hash
+                snapshot_data = dict(old_row) if old_row else None
+
+            await insert_snapshot(
+                conn,
+                crawl_task_id,
+                "score_segments",
+                entity_id,
+                content_hash,
+                change_type,
+                previous_hash=previous_hash,
+                snapshot_data=snapshot_data,
+            )
+            counts[change_type] += 1
+    return counts
 
 
 async def _persist_new(conn: asyncpg.Connection, item: dict[str, Any], upsert_fn: UpsertFn | None) -> int | None:

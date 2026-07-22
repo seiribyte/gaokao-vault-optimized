@@ -87,3 +87,24 @@ def test_crawl_liaoning_passes_scoped_config_and_exports_subject() -> None:
     assert export_args is not None
     assert export_args.kwargs["plan_year"] == 2026
     assert export_args.kwargs["subject"] == "历史"
+
+
+def test_run_spider_reports_failed_stats_without_success_message() -> None:
+    config = AppConfig()
+    pool = MagicMock()
+    orchestrator = MagicMock()
+    orchestrator.run_single = AsyncMock(return_value={"new": 1, "updated": 0, "unchanged": 0, "failed": 2})
+
+    with (
+        patch("gaokao_vault.config.CrawlConfig", return_value=config.crawl),
+        patch("gaokao_vault.config.AppConfig", return_value=config),
+        patch("gaokao_vault.cli._setup_logging"),
+        patch("gaokao_vault.db.connection.create_pool", new=AsyncMock(return_value=pool)),
+        patch("gaokao_vault.db.connection.close_pool", new=AsyncMock()),
+        patch("gaokao_vault.scheduler.orchestrator.Orchestrator", return_value=orchestrator),
+    ):
+        result = runner.invoke(app, ["run-spider", "enrollment_plans"])
+
+    assert result.exit_code == 1
+    assert "failed" in result.output
+    assert "finished" not in result.output

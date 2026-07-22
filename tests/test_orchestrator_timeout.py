@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from gaokao_vault.config import CrawlConfig
+from gaokao_vault.constants import PHASE2_TYPES, PHASE3_TYPES
 from gaokao_vault.scheduler.orchestrator import Orchestrator
 
 NO_ACTIVE_CRAWL_MESSAGE = "No active crawl to stop"
@@ -80,3 +81,19 @@ def test_run_spider_stream_propagates_checkpoint_errors() -> None:
 
     with pytest.raises(_CheckpointExceptionGroup, match=CHECKPOINT_FAILURE_MESSAGE):
         asyncio.run(Orchestrator._run_spider_stream(_CheckpointFailSpider()))
+
+
+def test_run_all_skips_phase3_when_phase2_has_failures() -> None:
+    orch = Orchestrator(db_pool=MagicMock(), mode="full")
+    phase2 = [{"failed": 1}] + [{"failed": 0}] * (len(PHASE2_TYPES) - 1)
+    phase3 = [{"failed": 0}] * len(PHASE3_TYPES)
+
+    with patch.object(orch, "_run_phase", new=AsyncMock(side_effect=[phase2, phase3])) as run_phase:
+        outcome = asyncio.run(orch.run_all())
+
+    run_phase.assert_awaited_once_with([t.value for t in PHASE2_TYPES])
+    assert outcome.total == len(PHASE2_TYPES)
+    assert outcome.failed == 1
+    assert outcome.completed is True
+    assert outcome.phase3_skipped is True
+    assert outcome.successful is False

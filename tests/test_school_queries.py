@@ -40,6 +40,9 @@ def test_upsert_school_preserves_existing_province_id_when_new_value_is_null():
     assert school_id == 99
     assert conn.args[2] is None
     assert "province_id=COALESCE(EXCLUDED.province_id, schools.province_id)" in conn.query
+    assert "sch_id < 0" in conn.query
+    assert "gaokao_school_id IS NOT NULL" in conn.query
+    assert "SELECT id FROM promoted" in conn.query
 
 
 def test_upsert_school_still_passes_non_null_province_id():

@@ -187,8 +187,8 @@ class ScoreLineSpider(BaseGaokaoSpider):
             return []
 
         s3 = self._build_s3()
-        analyzer = VisionAnalyzer(openai_config, s3=s3)
-        records = await analyzer.analyze(screenshot_path, province_name, year)
+        async with VisionAnalyzer(openai_config, s3=s3) as analyzer:
+            records = await analyzer.analyze(screenshot_path, province_name, year)
         if not records:
             logger.warning("No records extracted from screenshot for %s %d", province_name, year)
         return records

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
+
+MajorCode = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class MajorCategoryItem(BaseModel):
@@ -21,7 +24,7 @@ class MajorItem(BaseModel):
     source_id: str | None = None
     category_id: int | None = None
     subcategory_id: int | None = None
-    code: str | None = None
+    code: MajorCode
     name: str
     education_level: str
     duration: str | None = None

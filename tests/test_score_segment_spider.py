@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from scrapling.parser import Adaptor
 
-from gaokao_vault.config import DatabaseConfig
+from gaokao_vault.config import CrawlConfig, DatabaseConfig
+from gaokao_vault.spiders.base import BaseGaokaoSpider
 from gaokao_vault.spiders.dxsbb_score_segments import DxsbbSegmentRecord
 from gaokao_vault.spiders.score_segment_spider import (
     DXSBB_SEGMENT_INDEX_URL,
@@ -228,7 +230,7 @@ def test_parse_eol_score_segment_article_table() -> None:
     ]
     assert all(item["subject_category_id"] == 3 for item in items)
     assert len(sink.items) == 2
-    assert spider._stats["updated"] == 2
+    assert spider._stats["updated"] == 0
 
 
 def test_parse_dxsbb_article_uses_vision_for_image_segment_table() -> None:
@@ -285,3 +287,50 @@ def test_parse_dxsbb_article_uses_vision_for_image_segment_table() -> None:
     ]
     assert all(item["subject_category_id"] == 3 for item in items)
     assert len(sink.items) == 2
+
+
+def test_flush_batch_applies_three_state_counts_to_spider_stats() -> None:
+    spider = _make_spider()
+    counts = {"new": 2, "updated": 1, "unchanged": 3, "failed": 0}
+
+    with patch(
+        "gaokao_vault.spiders.score_segment_spider.deduplicate_score_segment_batch",
+        new=AsyncMock(return_value=counts),
+    ) as persist:
+        flushed = asyncio.run(spider._flush_batch(MagicMock(), [{"score": 600}] * 6))
+
+    assert flushed == 6
+    assert spider._stats == counts
+    persist.assert_awaited_once()
+
+
+def test_on_close_records_pending_rows_and_runs_base_cleanup_when_retry_fails() -> None:
+    spider = _make_spider()
+    sink = MagicMock(buffer_size=2)
+    sink.flush = AsyncMock(side_effect=RuntimeError("flush failed"))
+    spider._sink = cast(Any, sink)
+
+    with (
+        patch.object(BaseGaokaoSpider, "on_close", new=AsyncMock()) as base_close,
+        pytest.raises(RuntimeError, match="flush failed"),
+    ):
+        asyncio.run(spider.on_close())
+
+    assert spider._stats["failed"] == 2
+    base_close.assert_awaited_once_with()
+
+
+def test_on_start_uses_configured_batch_size() -> None:
+    spider = _make_spider()
+    spider._crawl_config = CrawlConfig(batch_size=37)
+    pool = MagicMock()
+    batch_sink = MagicMock()
+
+    with (
+        patch.object(spider, "_get_pool", new=AsyncMock(return_value=pool)),
+        patch("gaokao_vault.spiders.score_segment_spider.BatchSink", return_value=batch_sink) as sink_cls,
+    ):
+        asyncio.run(spider.on_start())
+
+    assert spider._sink is batch_sink
+    assert sink_cls.call_args.kwargs["batch_size"] == 37

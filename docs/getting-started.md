@@ -33,6 +33,25 @@ docker compose run --rm crawler status
 
 数据持久化在 Docker volume 中，`docker compose down` 不会丢数据。彻底清理用 `docker compose down -v`。
 
+### Docker 构建与密钥边界
+
+镜像构建只接收运行所需文件（`src/`、`pyproject.toml`、`uv.lock`、`README.md`）。
+根目录 `.dockerignore` 会排除 `.env`、`.git/`、`.venv/`、`crawl_data/`、测试与本地工作区。
+
+Compose 通过 `env_file: .env` 在**容器启动时**注入环境变量；`.env` 不会被复制进镜像层。
+新构建的镜像不代表历史镜像/构建缓存已经清理。
+
+如果本地或部署主机曾经用包含真实 `.env` 的目录执行过 `docker compose build`，按下面清单处理：
+
+1. 停止相关服务并删除本项目本地构建的镜像：`docker compose down --rmi local`
+2. 查看 BuildKit 缓存占用：`docker builder du`
+3. 确认主机上没有其他构建依赖这些缓存后，再交互式执行 `docker builder prune`
+4. 轮换可能曾进入上下文的 OpenAI、数据库、S3/MinIO 凭据
+5. 将**新凭据**只写入运行时 `.env` 或平台 secret，不要提交到 Git
+6. 重新构建并启动：`docker compose build crawler scheduler && docker compose up -d`
+
+真实凭据轮换由操作者完成；仓库文档只提供清单，不保存或传输密钥。
+
 ## 方式二：本地安装
 
 ### 安装依赖
@@ -60,9 +79,9 @@ cp .env.example .env
 | `GAOKAO_DB__POOL_MIN` | 连接池最小连接数 | `5` |
 | `GAOKAO_DB__POOL_MAX` | 连接池最大连接数 | `20` |
 | `GAOKAO_PROXY__STATIC_PROXIES` | 付费代理列表 (JSON) | `[]` |
-| `GAOKAO_PROXY__USE_FREEPROXY` | 是否启用免费代理 | `false` |
-| `GAOKAO_CRAWL__CONCURRENCY` | 并发请求数 | `5` |
-| `GAOKAO_CRAWL__BASE_DELAY` | 请求基础延迟(秒) | `1.0` |
+| `GAOKAO_PROXY__USE_FREEPROXY` | 是否启用免费代理 | `true` |
+| `GAOKAO_CRAWL__CONCURRENCY` | 并发请求数 | `2` |
+| `GAOKAO_CRAWL__BASE_DELAY` | 请求基础延迟(秒) | `2.0` |
 | `OPENAI_API_BASE` | OpenAI API 地址 | `https://api.openai.com/v1` |
 | `OPENAI_API_KEY` | OpenAI API 密钥 | （必填，用于分数线截图 AI 分析） |
 
@@ -96,7 +115,7 @@ gaokao-vault healthcheck
 
 ### 健康检查
 
-`gaokao-vault healthcheck` 命令通过调用 OpenAI `/models` 端点（只读、零 token 消耗）来验证 API 配置是否正确：
+`gaokao-vault healthcheck` 命令通过调用 OpenAI Responses API 的最小流式请求来验证 API 配置。探针请求最多生成 5 个 output tokens，因此会产生实际 API 调用和用量：
 
 - 成功时输出 `ok` 到 stdout，退出码 0
 - 失败时输出错误信息到 stderr，退出码 1（如 key 未配置、认证失败、超时、连接失败等）

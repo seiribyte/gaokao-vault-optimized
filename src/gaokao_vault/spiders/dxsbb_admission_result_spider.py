@@ -42,6 +42,7 @@ class DxsbbAdmissionResultSpider(BaseGaokaoSpider):
 
     def configure_sessions(self, manager) -> None:
         manager.add("http", FetcherSession())
+        self._add_stealth_session(manager)
 
     async def start_requests(self):
         yield Request(DXSBB_ADMISSION_LIST_URL, callback=self.parse_list)
@@ -132,6 +133,10 @@ class DxsbbAdmissionResultSpider(BaseGaokaoSpider):
                 "year": item["year"],
                 "subject_category_id": item.get("subject_category_id"),
                 "batch": item["batch"],
+                "school_code_raw": item.get("school_code_raw"),
+                "major_group_code": item.get("major_group_code"),
+                "major_code_raw": item.get("major_code_raw"),
+                "major_name_raw": item.get("major_name_raw"),
             },
             upsert_fn=upsert_major_admission_result,
         )
@@ -152,7 +157,7 @@ class DxsbbAdmissionResultSpider(BaseGaokaoSpider):
         major_name = _cell_text(cells, _column_index(header_map, ("专业名称", "专业")))
         if year is None or not major_name:
             return None
-        if self._crawl_config.target_year_start is not None and year < self._crawl_config.target_year_start:
+        if year < self._crawl_config.effective_year_start:
             return None
         if self._crawl_config.target_year_end is not None and year > self._crawl_config.target_year_end:
             return None
@@ -403,7 +408,10 @@ def _parse_score(value: str) -> int | None:
 
 
 async def _find_school_by_name(conn: asyncpg.Connection, school_name: str) -> dict | None:
-    row = await conn.fetchrow("SELECT id, name FROM schools WHERE name = $1", school_name)
+    row = await conn.fetchrow(
+        "SELECT id, name FROM schools WHERE name = $1 ORDER BY (sch_id > 0) DESC, id LIMIT 1",
+        school_name,
+    )
     return dict(row) if row else None
 
 

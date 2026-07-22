@@ -109,7 +109,7 @@ class IncrementalCronScheduler:
             raise ValueError(msg)
         self._types = types if types is not None else app_config.schedule.types
         self._max_concurrent_types = app_config.schedule.max_concurrent_types
-        self._running_task: asyncio.Task[None] | None = None
+        self._running_task: asyncio.Task | None = None
         self._last_checked_minute: datetime | None = None
 
     async def run_forever(self) -> None:
@@ -141,17 +141,30 @@ class IncrementalCronScheduler:
 
         logger.info("Cron matched at %s; starting scheduled crawl", now.isoformat())
         self._running_task = asyncio.create_task(self._run_incremental_crawl(now))
+        self._running_task.add_done_callback(self._consume_run_result)
 
-    async def _run_incremental_crawl(self, scheduled_at: datetime) -> None:
+    @staticmethod
+    def _consume_run_result(task: asyncio.Task) -> None:
+        if task.cancelled():
+            logger.error("Scheduled crawl task was cancelled")
+            return
+        # Always retrieve the exception so asyncio does not emit an unobserved-task warning.
+        error = task.exception()
+        if error is not None:
+            logger.error("Scheduled crawl task failed: %s", error)
+
+    async def _run_incremental_crawl(self, scheduled_at: datetime):
         from gaokao_vault.constants import PHASE2_TYPES, PHASE3_TYPES
         from gaokao_vault.db.connection import close_pool, create_pool
         from gaokao_vault.db.queries.crawl_meta import fail_stale_running_tasks
         from gaokao_vault.scheduler.orchestrator import Orchestrator
 
         started = monotonic()
-        pool = await create_pool(self._app_config.db)
         scheduled_types = self._types or [task_type.value for task_type in [*PHASE2_TYPES, *PHASE3_TYPES]]
+        pool_created = False
         try:
+            pool = await create_pool(self._app_config.db)
+            pool_created = True
             recovered = await fail_stale_running_tasks(
                 pool,
                 stale_after_seconds=self._app_config.crawl.spider_timeout,
@@ -166,9 +179,10 @@ class IncrementalCronScheduler:
                 app_config=self._app_config,
             )
             if self._types:
-                await orchestrator.run_independent(scheduled_types, max_concurrent=self._max_concurrent_types)
+                outcome = await orchestrator.run_independent(scheduled_types, max_concurrent=self._max_concurrent_types)
             else:
-                await orchestrator.run_all()
+                outcome = await orchestrator.run_all()
+            self._raise_for_unsuccessful_outcome(outcome)
         except Exception:
             logger.exception(
                 "Scheduled crawl failed scheduled_at=%s mode=%s types=%s",
@@ -176,6 +190,7 @@ class IncrementalCronScheduler:
                 self._mode,
                 scheduled_types,
             )
+            raise
         else:
             logger.info(
                 "Scheduled crawl finished scheduled_at=%s mode=%s types=%s duration=%.1fs",
@@ -184,8 +199,15 @@ class IncrementalCronScheduler:
                 scheduled_types,
                 monotonic() - started,
             )
+            return outcome
         finally:
-            await close_pool()
+            if pool_created:
+                await close_pool()
+
+    @staticmethod
+    def _raise_for_unsuccessful_outcome(outcome) -> None:
+        if not outcome.successful:
+            raise RuntimeError(outcome.describe_failure())
 
     @staticmethod
     def _current_minute() -> datetime:

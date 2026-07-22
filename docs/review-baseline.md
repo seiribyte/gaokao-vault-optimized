@@ -1,6 +1,6 @@
 # 跨会话代码审查基线
 
-本文件把已经确认的抓取、数据管道和运行约束从聊天记录中固定下来。审查新会话必须先读本文件，再读 [AGENTS.md](../AGENTS.md)、[CLAUDE.md](../CLAUDE.md) 和变更涉及的架构文档。
+本文件把已经确认的抓取、数据管道和运行约束从聊天记录中固定下来。审查新会话必须先读本文件，再读 [AGENTS.md](https://github.com/lifefloating/gaokao-vault/blob/main/AGENTS.md)、[CLAUDE.md](https://github.com/lifefloating/gaokao-vault/blob/main/CLAUDE.md) 和变更涉及的架构文档。
 
 表中的初始条目是从现有规则、架构文档、测试和代码整理出的候选基线。只有你明确确认过的条目才算 `accepted`；不确定的条目先改为 `proposed`，不能用它直接否定审查 finding。
 
@@ -25,7 +25,7 @@
 | GV-007 | 单元测试和 Spider 契约测试默认使用离线 fixture，不依赖真实网站 | 不要把网络成功当成测试稳定性的证明 |
 | GV-008 | `uv`、ruff/pre-commit、ty、deptry 和 pytest 是交付门槛 | 只改文档或 fixture 也要说明实际运行的检查范围 |
 
-来源：[架构文档](architecture.md)、[模块文档](modules.md)、[AGENTS.md](../AGENTS.md) 及现有测试。若实现已经改变某项决定，先新增或更新记录，不要让代码悄悄成为新规范。
+来源：[架构文档](architecture.md)、[模块文档](modules.md)、[AGENTS.md](https://github.com/lifefloating/gaokao-vault/blob/main/AGENTS.md) 及现有测试。若实现已经改变某项决定，先新增或更新记录，不要让代码悄悄成为新规范。
 
 ## Finding 分类
 

@@ -27,6 +27,7 @@ dependencies = [
     "fake-useragent>=2.0",
     "openai>=1.0",
     "boto3>=1.35",
+    "tzdata>=2026.3",
     "openpyxl>=3.1",
 ]
 
@@ -63,6 +64,9 @@ packages = ["src/gaokao_vault"]
 [tool.ty.environment]
 python = "./.venv"
 python-version = "3.10"
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["tzdata"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -115,6 +119,10 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+# One-shot runners are operational boundary programs: their long orchestration
+# functions and deliberate exception translation are reviewed separately from
+# library code. Chinese source labels are literal data, not ambiguous prose.
+"scripts/*" = ["C901", "RUF001", "TRY003", "TRY004", "TRY300", "TRY301"]
 
 [tool.ruff.format]
 preview = true

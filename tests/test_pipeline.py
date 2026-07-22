@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+import logging
+from unittest.mock import AsyncMock, patch
 
+import pytest
 from conftest import make_mock_pool_and_conn
 
 from gaokao_vault.models.school import SchoolItem
 from gaokao_vault.models.score import ScoreLineItem
-from gaokao_vault.pipeline.dedup import deduplicate_and_persist
+from gaokao_vault.pipeline.dedup import (
+    deduplicate_and_persist,
+    deduplicate_and_persist_on_connection,
+    deduplicate_score_segment_batch,
+)
 from gaokao_vault.pipeline.hasher import compute_content_hash
+from gaokao_vault.pipeline.quality import missing_field_flags
 from gaokao_vault.pipeline.validator import validate_item
 
 
@@ -35,6 +42,17 @@ class TestContentHash:
         item1 = {"name": "Test", "sch_id": 1, "city": "Beijing"}
         item2 = {"city": "Beijing", "sch_id": 1, "name": "Test"}
         assert compute_content_hash(item1) == compute_content_hash(item2)
+
+
+def test_missing_field_flags_handles_empty_structures_without_flagging_falsy_scalars() -> None:
+    data = {
+        "registration_window": {},
+        "eligible_majors": [],
+        "plan_count": 0,
+        "enabled": False,
+    }
+
+    assert missing_field_flags(data, tuple(data)) == ["missing_registration_window", "missing_eligible_majors"]
 
 
 class TestValidator:
@@ -70,6 +88,17 @@ class TestValidator:
         }
         result = validate_item(ScoreLineItem, data)
         assert result is None
+
+    def test_invalid_item_log_redacts_raw_input_values(self, caplog):
+        secret = "=".join(("token", "super" + "-secret-value"))
+        with caplog.at_level(logging.WARNING, logger="gaokao_vault.pipeline.validator"):
+            result = validate_item(ScoreLineItem, {"province_id": secret, "year": 2024, "batch": "本科一批"})
+
+        assert result is None
+        assert secret not in caplog.text
+        assert "ScoreLineItem" in caplog.text
+        assert "province_id" in caplog.text
+        assert "int_parsing" in caplog.text
 
     def test_school_defaults(self):
         data = {"sch_id": 42, "name": "Test U"}
@@ -120,3 +149,65 @@ class TestDedupPersistence:
         )
 
         assert result == "failed"
+
+    def test_connection_owned_dedup_rolls_back_when_snapshot_fails(self):
+        _, conn, transaction_context = make_mock_pool_and_conn()
+
+        with (
+            patch("gaokao_vault.pipeline.dedup.find_latest_hash", new=AsyncMock(return_value=(None, None))),
+            patch(
+                "gaokao_vault.pipeline.dedup.insert_snapshot",
+                new=AsyncMock(side_effect=RuntimeError("snapshot failed")),
+            ),
+            pytest.raises(RuntimeError, match="snapshot failed"),
+        ):
+            asyncio.run(
+                deduplicate_and_persist_on_connection(
+                    conn,
+                    entity_type="schools",
+                    item={"sch_id": 1, "name": "Test"},
+                    content_hash="abc",
+                    unique_keys={"sch_id": 1},
+                    crawl_task_id=1,
+                    upsert_fn=AsyncMock(return_value=123),
+                )
+            )
+
+        transaction_context.__aexit__.assert_awaited_once()
+        assert transaction_context.__aexit__.await_args.args[0] is RuntimeError
+
+    def test_score_segment_batch_records_three_state_snapshots_in_one_transaction(self):
+        _, conn, transaction_context = make_mock_pool_and_conn()
+        rows = [
+            {
+                "province_id": 7,
+                "year": 2025,
+                "subject_category_id": None,
+                "score": score,
+                "segment_count": 1,
+                "cumulative_count": 1,
+                "content_hash": content_hash,
+            }
+            for score, content_hash in [(600, "new-hash"), (599, "same-hash"), (598, "changed-hash")]
+        ]
+
+        with (
+            patch(
+                "gaokao_vault.pipeline.dedup.find_latest_hash",
+                new=AsyncMock(side_effect=[(None, None), (22, "same-hash"), (23, "old-hash")]),
+            ),
+            patch(
+                "gaokao_vault.pipeline.dedup.upsert_score_segment",
+                new=AsyncMock(side_effect=[21, 23]),
+            ) as upsert,
+            patch("gaokao_vault.pipeline.dedup.insert_snapshot", new=AsyncMock(return_value=1)) as snapshot,
+        ):
+            conn.fetchrow.return_value = {"id": 23, "content_hash": "old-hash", "score": 598}
+            counts = asyncio.run(deduplicate_score_segment_batch(conn, rows, crawl_task_id=99))
+
+        assert counts == {"new": 1, "updated": 1, "unchanged": 1, "failed": 0}
+        assert upsert.await_count == 2
+        assert [call.args[5] for call in snapshot.await_args_list] == ["new", "unchanged", "updated"]
+        assert all(row["crawl_task_id"] == 99 for row in rows)
+        transaction_context.__aenter__.assert_awaited_once_with()
+        transaction_context.__aexit__.assert_awaited_once()

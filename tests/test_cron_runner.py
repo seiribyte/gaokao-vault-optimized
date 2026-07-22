@@ -8,6 +8,7 @@ import pytest
 
 from gaokao_vault.config import AppConfig, ScheduleConfig
 from gaokao_vault.scheduler.cron_runner import CronExpression, IncrementalCronScheduler
+from gaokao_vault.scheduler.orchestrator import CrawlOutcome
 
 
 def test_cron_expression_defaults_to_midnight_match() -> None:
@@ -121,3 +122,24 @@ def test_scheduler_recovers_stale_running_tasks_before_default_crawl() -> None:
         asyncio.run(scheduler._run_incremental_crawl(datetime(2026, 4, 23, 14, 0)))
 
     fail_stale.assert_awaited_once_with(fake_pool, stale_after_seconds=config.crawl.spider_timeout)
+
+
+def test_scheduler_does_not_close_pool_when_creation_fails() -> None:
+    scheduler = IncrementalCronScheduler(AppConfig())
+    create_error = RuntimeError("database unavailable")
+
+    with (
+        patch("gaokao_vault.db.connection.create_pool", new=AsyncMock(side_effect=create_error)),
+        patch("gaokao_vault.db.connection.close_pool", new=AsyncMock()) as close_pool,
+        pytest.raises(RuntimeError, match="database unavailable"),
+    ):
+        asyncio.run(scheduler._run_incremental_crawl(datetime(2026, 4, 23, 14, 0)))
+
+    close_pool.assert_not_awaited()
+
+
+def test_scheduler_raises_for_unsuccessful_outcome() -> None:
+    outcome = CrawlOutcome(total=2, failed=1, completed=True, error="crawl failed")
+
+    with pytest.raises(RuntimeError, match="crawl failed"):
+        IncrementalCronScheduler._raise_for_unsuccessful_outcome(outcome)

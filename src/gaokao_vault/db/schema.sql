@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS subject_categories (
 CREATE TABLE IF NOT EXISTS schools (
     id              BIGSERIAL PRIMARY KEY,
     sch_id          INTEGER UNIQUE NOT NULL,
+    gaokao_school_id INTEGER,
     name            VARCHAR(100) NOT NULL,
     province_id     INTEGER REFERENCES provinces(id),
     city            VARCHAR(50),
@@ -179,6 +180,9 @@ CREATE TABLE IF NOT EXISTS schools (
 
 CREATE INDEX IF NOT EXISTS idx_schools_province ON schools(province_id);
 CREATE INDEX IF NOT EXISTS idx_schools_level ON schools(level);
+ALTER TABLE schools ADD COLUMN IF NOT EXISTS gaokao_school_id INTEGER;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_schools_gaokao_school_id
+    ON schools(gaokao_school_id) WHERE gaokao_school_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_schools_name ON schools USING gin(name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_schools_features ON schools(is_double_first, is_985, is_211);
 
@@ -379,6 +383,22 @@ CREATE TABLE IF NOT EXISTS admission_score_lines (
     UNIQUE(province_id, year, subject_category_id, batch, special_name)
 );
 
+ALTER TABLE admission_score_lines
+    DROP CONSTRAINT IF EXISTS admission_score_lines_province_id_year_subject_category_id_batch_special_name_key;
+WITH ranked_score_lines AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+               PARTITION BY province_id, year, subject_category_id, batch, special_name
+               ORDER BY updated_at DESC, id DESC
+           ) AS row_number
+    FROM admission_score_lines
+)
+DELETE FROM admission_score_lines AS current_row
+USING ranked_score_lines AS ranked
+WHERE current_row.id = ranked.id AND ranked.row_number > 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_admission_score_lines_unique_key
+    ON admission_score_lines(province_id, year, subject_category_id, batch, special_name) NULLS NOT DISTINCT;
+
 CREATE INDEX IF NOT EXISTS idx_score_lines_province_year ON admission_score_lines(province_id, year);
 
 DROP TRIGGER IF EXISTS update_admission_score_lines_updated_at ON admission_score_lines;
@@ -399,6 +419,22 @@ CREATE TABLE IF NOT EXISTS score_segments (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(province_id, year, subject_category_id, score)
 );
+
+ALTER TABLE score_segments
+    DROP CONSTRAINT IF EXISTS score_segments_province_id_year_subject_category_id_score_key;
+WITH ranked_score_segments AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+               PARTITION BY province_id, year, subject_category_id, score
+               ORDER BY updated_at DESC, id DESC
+           ) AS row_number
+    FROM score_segments
+)
+DELETE FROM score_segments AS current_row
+USING ranked_score_segments AS ranked
+WHERE current_row.id = ranked.id AND ranked.row_number > 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_score_segments_unique_key
+    ON score_segments(province_id, year, subject_category_id, score) NULLS NOT DISTINCT;
 
 CREATE INDEX IF NOT EXISTS idx_segments_province_year ON score_segments(province_id, year, subject_category_id);
 CREATE INDEX IF NOT EXISTS idx_segments_score ON score_segments(province_id, year, subject_category_id, score);
@@ -454,9 +490,6 @@ CREATE TABLE IF NOT EXISTS enrollment_plans (
 CREATE INDEX IF NOT EXISTS idx_plans_school_province_year ON enrollment_plans(school_id, province_id, year);
 CREATE INDEX IF NOT EXISTS idx_plans_province_year ON enrollment_plans(province_id, year);
 CREATE INDEX IF NOT EXISTS idx_plans_major ON enrollment_plans(major_id) WHERE major_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_enrollment_plans_unique_key
-    ON enrollment_plans(school_id, province_id, year, subject_category_id, batch, major_name) NULLS NOT DISTINCT;
-
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS major_group_code VARCHAR(50);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS school_code_raw VARCHAR(50);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS batch_code VARCHAR(30);
@@ -478,6 +511,13 @@ ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS data_source VARCHAR(100);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS source_url VARCHAR(255);
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS source_updated_at TIMESTAMPTZ;
 ALTER TABLE enrollment_plans ADD COLUMN IF NOT EXISTS quality_flags JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+DROP INDEX IF EXISTS idx_enrollment_plans_unique_key;
+CREATE UNIQUE INDEX idx_enrollment_plans_unique_key
+    ON enrollment_plans(
+        school_id, province_id, year, subject_category_id, batch,
+        school_code_raw, major_group_code, major_code_raw, major_name
+    ) NULLS NOT DISTINCT;
 
 DROP TRIGGER IF EXISTS update_enrollment_plans_updated_at ON enrollment_plans;
 CREATE TRIGGER update_enrollment_plans_updated_at BEFORE UPDATE ON enrollment_plans
@@ -525,8 +565,7 @@ CREATE TABLE IF NOT EXISTS major_admission_results (
     content_hash    VARCHAR(64),
     crawl_task_id   BIGINT REFERENCES crawl_tasks(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE NULLS NOT DISTINCT (school_id, major_id, province_id, year, subject_category_id, batch)
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_major_admission_school_province_year
@@ -553,6 +592,37 @@ ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS service_obligation 
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS data_source VARCHAR(100);
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS source_updated_at TIMESTAMPTZ;
 ALTER TABLE major_admission_results ADD COLUMN IF NOT EXISTS quality_flags JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+DO $$
+DECLARE
+    constraint_name TEXT;
+BEGIN
+    FOR constraint_name IN
+        SELECT constraint_row.conname
+        FROM pg_constraint AS constraint_row
+        WHERE constraint_row.conrelid = 'major_admission_results'::regclass
+          AND constraint_row.contype = 'u'
+          AND ARRAY(
+              SELECT attribute.attname::TEXT
+              FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, position)
+              JOIN pg_attribute AS attribute
+                ON attribute.attrelid = constraint_row.conrelid
+               AND attribute.attnum = key_column.attnum
+              ORDER BY key_column.position
+          ) = ARRAY[
+              'school_id', 'major_id', 'province_id', 'year', 'subject_category_id', 'batch'
+          ]::TEXT[]
+    LOOP
+        EXECUTE format('ALTER TABLE major_admission_results DROP CONSTRAINT %I', constraint_name);
+    END LOOP;
+END $$;
+
+DROP INDEX IF EXISTS idx_major_admission_results_unique_key;
+CREATE UNIQUE INDEX idx_major_admission_results_unique_key
+    ON major_admission_results(
+        school_id, major_id, province_id, year, subject_category_id, batch,
+        school_code_raw, major_group_code, major_code_raw, major_name_raw
+    ) NULLS NOT DISTINCT;
 
 DROP TRIGGER IF EXISTS update_major_admission_results_updated_at ON major_admission_results;
 CREATE TRIGGER update_major_admission_results_updated_at BEFORE UPDATE ON major_admission_results
@@ -815,8 +885,10 @@ SELECT
     s.city,
     s.school_type,
     CASE
-        WHEN s.is_private THEN '民办'
-        ELSE '公办'
+        WHEN s.is_sino_foreign THEN '中外合作办学'
+        WHEN s.is_private OR s.is_independent THEN '民办'
+        WHEN s.crawl_task_id IS NOT NULL THEN '公办'
+        ELSE NULL
     END AS ownership_type,
     ARRAY_REMOVE(ARRAY[
         CASE WHEN s.is_985 THEN '985' END,

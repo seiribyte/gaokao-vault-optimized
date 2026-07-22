@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, ClassVar, cast
@@ -54,17 +55,22 @@ class BaseGaokaoSpider(Spider):
         **kwargs,
     ):
         self._crawl_config = config or CrawlConfig()
+        self._proxy_config = app_config.proxy if app_config is not None else None
         # Set _rs_wait_ms BEFORE super().__init__() because it calls
         # configure_sessions() which reads self._rs_wait_ms.
-        self._rs_wait_ms = 10000  # default RS wait
-        self._browser_timeout_ms = 120000  # default browser navigation timeout
+        self._rs_wait_ms = self._crawl_config.rs_wait_ms
+        self._browser_timeout_ms = self._crawl_config.browser_timeout_ms
         if config:
-            self._rs_wait_ms = self._crawl_config.rs_wait_ms
-            self._browser_timeout_ms = self._crawl_config.browser_timeout_ms
+            self.concurrent_requests = self._crawl_config.concurrency
+            self.concurrent_requests_per_domain = self._crawl_config.concurrency_per_domain
+            self.download_delay = self._crawl_config.base_delay
+            if "max_blocked_retries" in self._crawl_config.model_fields_set:
+                self.max_blocked_retries = self._crawl_config.max_blocked_retries
 
         super().__init__(**kwargs)
         self._db_config = db_config
         self._local_pool: asyncpg.Pool | None = None
+        self._pool_lock = asyncio.Lock()
         self.crawl_task_id = crawl_task_id
         self.mode = mode
         self._stats: dict[str, int] = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
@@ -73,15 +79,12 @@ class BaseGaokaoSpider(Spider):
         self._heartbeat_interval: int = self._crawl_config.heartbeat_interval
         self._items_since_heartbeat: int = 0
 
-        if config:
-            self.concurrent_requests = self._crawl_config.concurrency
-            self.concurrent_requests_per_domain = self._crawl_config.concurrency_per_domain
-            self.download_delay = self._crawl_config.base_delay
-
     async def _get_pool(self) -> asyncpg.Pool:
         """Lazily create a local asyncpg pool bound to the current event loop."""
         if self._local_pool is None:
-            self._local_pool = await create_local_pool(self._db_config)
+            async with self._pool_lock:
+                if self._local_pool is None:
+                    self._local_pool = await create_local_pool(self._db_config)
         return self._local_pool
 
     # ------------------------------------------------------------------
@@ -123,8 +126,8 @@ class BaseGaokaoSpider(Spider):
         return sc_id
 
     def configure_sessions(self, manager) -> None:
-        rotator = get_proxy_rotator()
-        proxy_diagnostics = get_proxy_diagnostics()
+        rotator = get_proxy_rotator(self._proxy_config)
+        proxy_diagnostics = get_proxy_diagnostics(self._proxy_config)
         if proxy_diagnostics["total_count"] == 0:
             logger.warning(
                 "Network path: direct egress via host IP (use_freeproxy=%s paid=%d free=%d total=%d)",
@@ -158,6 +161,9 @@ class BaseGaokaoSpider(Spider):
                 proxy_rotator=rotator,
             ),
         )
+        self._add_stealth_session(manager, rotator=rotator)
+
+    def _add_stealth_session(self, manager, *, rotator=None) -> None:
         manager.add(
             "stealth",
             AsyncStealthySession(
@@ -171,7 +177,7 @@ class BaseGaokaoSpider(Spider):
                 extra_headers={"Referer": "https://gaokao.chsi.com.cn/"},
                 additional_args={"viewport": {"width": 1366, "height": 768}},
                 impersonate=cast(Any, IMPERSONATE_LIST),
-                proxy_rotator=rotator,
+                proxy_rotator=rotator if rotator is not None else get_proxy_rotator(self._proxy_config),
             ),
             lazy=True,
         )
@@ -191,7 +197,8 @@ class BaseGaokaoSpider(Spider):
         return request
 
     async def on_error(self, request: Request, error: Exception) -> None:
-        """Log request-level errors for debugging."""
+        """Record final request-level errors for task outcome aggregation."""
+        self._stats["failed"] += 1
         logger.error("Request failed: %s — %s: %s", request.url, type(error).__name__, error)
 
     def _maybe_heartbeat(self) -> None:
@@ -236,17 +243,20 @@ class BaseGaokaoSpider(Spider):
     async def on_close(self) -> None:
         from gaokao_vault.db.queries.crawl_meta import update_task_stats
 
-        await update_task_stats(await self._get_pool(), self.crawl_task_id, self._stats)
-        logger.info(
-            "Spider %s finished: new=%d updated=%d unchanged=%d failed=%d",
-            self.name,
-            self._stats["new"],
-            self._stats["updated"],
-            self._stats["unchanged"],
-            self._stats["failed"],
-        )
-        if self._local_pool is not None:
-            await self._local_pool.close()
+        pool = await self._get_pool()
+        try:
+            await update_task_stats(pool, self.crawl_task_id, self._stats)
+            logger.info(
+                "Spider %s finished: new=%d updated=%d unchanged=%d failed=%d",
+                self.name,
+                self._stats["new"],
+                self._stats["updated"],
+                self._stats["unchanged"],
+                self._stats["failed"],
+            )
+        finally:
+            self._local_pool = None
+            await pool.close()
 
     async def parse(self, response: Response):
         raise NotImplementedError

@@ -11,8 +11,8 @@ from scrapling.spiders import Request, Response
 
 from gaokao_vault.config import AppConfig, CrawlConfig, DatabaseConfig
 from gaokao_vault.constants import TaskType
-from gaokao_vault.db.queries.scores import batch_upsert_score_segments
 from gaokao_vault.models.score import ScoreSegmentItem
+from gaokao_vault.pipeline.dedup import deduplicate_score_segment_batch
 from gaokao_vault.pipeline.hasher import compute_content_hash
 from gaokao_vault.pipeline.sink import BatchSink
 from gaokao_vault.pipeline.validator import validate_item
@@ -76,18 +76,21 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
                 },
             ),
         )
+        self._add_stealth_session(manager)
 
     async def on_start(self, resuming: bool = False):
         pool = await self._get_pool()
         self._sink = BatchSink(
             pool=pool,
             flush_fn=self._flush_batch,
-            batch_size=500,
+            batch_size=self._crawl_config.batch_size,
         )
 
-    @staticmethod
-    async def _flush_batch(conn, rows):
-        return await batch_upsert_score_segments(conn, rows)
+    async def _flush_batch(self, conn, rows):
+        counts = await deduplicate_score_segment_batch(conn, rows, self.crawl_task_id)
+        for key in ("new", "updated", "unchanged", "failed"):
+            self._stats[key] += counts[key]
+        return sum(counts.values())
 
     async def start_requests(self):
         provinces = await load_province_targets(
@@ -99,7 +102,7 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
                 mode=self.mode,
                 full_start_year=YEAR_START,
                 current_year=YEAR_END,
-                target_start_year=self._crawl_config.target_year_start,
+                target_start_year=self._crawl_config.effective_year_start,
                 target_end_year=self._crawl_config.target_year_end,
             )
         )
@@ -308,16 +311,18 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
         item["content_hash"] = compute_content_hash(item)
         item["crawl_task_id"] = self.crawl_task_id
         if self._sink:
-            before = self._sink.total_flushed
             await self._sink.add(item)
-            self._stats["updated"] += self._sink.total_flushed - before
 
     async def on_close(self) -> None:
-        if self._sink:
-            before = self._sink.total_flushed
-            await self._sink.flush()
-            self._stats["updated"] += self._sink.total_flushed - before
-        await super().on_close()
+        try:
+            if self._sink:
+                await self._sink.flush()
+        except Exception:
+            if self._sink:
+                self._stats["failed"] += self._sink.buffer_size
+            raise
+        finally:
+            await super().on_close()
 
 
 def _latest_eol_index_year() -> int:

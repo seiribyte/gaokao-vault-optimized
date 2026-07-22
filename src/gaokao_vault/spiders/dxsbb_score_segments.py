@@ -174,13 +174,13 @@ class DxsbbScoreSegmentParser:
             year=year,
             subject_hint=subject_hint or "",
         )
-        analyzer = VisionAnalyzer(self._app_config.openai)
-        records = await analyzer.analyze_image_url(
-            image_url,
-            prompt=prompt,
-            province_name=province_name,
-            year=year,
-        )
+        async with VisionAnalyzer(self._app_config.openai) as analyzer:
+            records = await analyzer.analyze_image_url(
+                image_url,
+                prompt=prompt,
+                province_name=province_name,
+                year=year,
+            )
         return [
             parsed
             for record in records

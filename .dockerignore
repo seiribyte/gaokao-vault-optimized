@@ -1,0 +1,61 @@
+# Secrets and local environment files — never enter build context.
+# Keep .env.example available as a non-secret template.
+.env
+.env.*
+!.env.example
+.envrc
+
+# Local Python environments and caches
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+site/
+
+# VCS, editor, and agent/workspace overlays
+.git/
+.github/
+.agents/
+.codex/
+.trellis/
+.devcontainer/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local crawl data, logs, and generated artifacts
+crawl_data/
+*.log
+
+# Tests, docs site sources, vendored skills, and helper scripts
+# are not required to build/run the image.
+tests/
+docs/
+skills/
+scripts/
+nginx/
+*.md
+!README.md
+LICENSE
+Makefile
+mkdocs.yml
+tox.ini
+codecov.yaml
+CONTRIBUTING.md
+CLAUDE.md
+AGENTS.md
+paseo.json
+.codegraph

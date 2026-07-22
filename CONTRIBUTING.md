@@ -9,7 +9,7 @@ You can contribute in many ways:
 
 ## Report Bugs
 
-Report bugs at https://github.com/https://github.com/lifefloating/gaokao-vault/issues
+Report bugs at https://github.com/lifefloating/gaokao-vault/issues
 
 If you are reporting a bug, please include:
 
@@ -33,7 +33,7 @@ gaokao-vault could always use more documentation, whether as part of the officia
 
 ## Submit Feedback
 
-The best way to send feedback is to file an issue at https://github.com/https://github.com/lifefloating/gaokao-vault/issues.
+The best way to send feedback is to file an issue at https://github.com/lifefloating/gaokao-vault/issues.
 
 If you are proposing a new feature:
 

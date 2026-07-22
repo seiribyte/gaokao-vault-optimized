@@ -31,9 +31,10 @@ class BatchSink:
         if not self._buffer:
             return 0
         batch = self._buffer[:]
-        self._buffer.clear()
         async with self._pool.acquire() as conn:
             count = await self._flush_fn(conn, batch)
+        # Retain the batch until the connection-aware flush returns successfully.
+        del self._buffer[: len(batch)]
         self._total_flushed += count
         logger.debug("Flushed %d items (total: %d)", count, self._total_flushed)
         return count

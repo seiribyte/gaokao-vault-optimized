@@ -7,6 +7,6 @@ def missing_field_flags(data: dict[str, Any], fields: tuple[str, ...]) -> list[s
     flags: list[str] = []
     for field in fields:
         value = data.get(field)
-        if value is None or value == "":
+        if value is None or value == "" or (isinstance(value, (dict, list)) and not value):
             flags.append(f"missing_{field}")
     return flags

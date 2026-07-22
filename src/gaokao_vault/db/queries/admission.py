@@ -21,7 +21,10 @@ async def upsert_major_admission_result(conn: asyncpg.Connection, data: dict) ->
             content_hash, crawl_task_id
         )
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39)
-        ON CONFLICT (school_id, major_id, province_id, year, subject_category_id, batch) DO UPDATE SET
+        ON CONFLICT (
+            school_id, major_id, province_id, year, subject_category_id, batch,
+            school_code_raw, major_group_code, major_code_raw, major_name_raw
+        ) DO UPDATE SET
             batch_code=EXCLUDED.batch_code,
             batch_category=EXCLUDED.batch_category,
             batch_segment=EXCLUDED.batch_segment,

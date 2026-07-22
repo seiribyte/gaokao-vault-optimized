@@ -30,4 +30,8 @@ INSERT INTO provinces (name, code, region, gaokao_mode, gaokao_mode_year) VALUES
 ('青海', '63', '西北', '传统文理', NULL),
 ('宁夏', '64', '西北', '传统文理', NULL),
 ('新疆', '65', '西北', '传统文理', NULL)
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (name) DO UPDATE SET
+    code = EXCLUDED.code,
+    region = EXCLUDED.region,
+    gaokao_mode = EXCLUDED.gaokao_mode,
+    gaokao_mode_year = EXCLUDED.gaokao_mode_year;

@@ -28,6 +28,9 @@ class _FakePool:
     def acquire(self):
         return _Acquire(self.conn)
 
+    async def close(self) -> None:
+        return None
+
 
 def _make_spider() -> MajorStrengthSignalSpider:
     db_config = DatabaseConfig(

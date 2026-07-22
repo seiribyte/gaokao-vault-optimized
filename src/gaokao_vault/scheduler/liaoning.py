@@ -28,21 +28,28 @@ async def run_liaoning_profile(
     reference_path: Path | None = None,
 ) -> dict[str, dict[str, int]]:
     results: dict[str, dict[str, int]] = {}
-    from gaokao_vault.scheduler.reference_catalog import sync_gaokao_school_index
-
-    async with orchestrator.db_pool.acquire() as conn:
-        results["gaokao_school_index"] = await sync_gaokao_school_index(conn)
-    if reference_path is not None:
-        from gaokao_vault.scheduler.reference_catalog import sync_reference_schools
+    if refresh_catalog:
+        from gaokao_vault.scheduler.reference_catalog import sync_gaokao_school_index
 
         async with orchestrator.db_pool.acquire() as conn:
-            results["reference_catalog"] = await sync_reference_schools(conn, reference_path)
+            results["gaokao_school_index"] = await sync_gaokao_school_index(conn)
+        if reference_path is not None:
+            from gaokao_vault.scheduler.reference_catalog import sync_reference_schools
+
+            async with orchestrator.db_pool.acquire() as conn:
+                results["reference_catalog"] = await sync_reference_schools(conn, reference_path)
     stages: Sequence[Sequence[str]] = (*(_CATALOG_STAGES if refresh_catalog else ()), *_LIAONING_STAGES)
     for stage_number, task_types in enumerate(stages, start=1):
         logger.info("辽宁专项抓取阶段 %d: %s", stage_number, task_types)
         stage_results = await asyncio.gather(*(orchestrator.run_single(task_type) for task_type in task_types))
+        failed_tasks: list[str] = []
         for task_type, stats in zip(task_types, stage_results, strict=True):
             results[task_type] = stats
             if stats.get("failed", 0):
+                failed_tasks.append(task_type)
                 logger.warning("辽宁专项任务存在失败项 task_type=%s stats=%s", task_type, stats)
+        if failed_tasks:
+            failed_text = ", ".join(failed_tasks)
+            msg = f"辽宁专项抓取失败, 已停止后续阶段: {failed_text}"
+            raise RuntimeError(msg)
     return results

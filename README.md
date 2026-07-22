@@ -30,6 +30,10 @@
 git clone https://github.com/lifefloating/gaokao-vault.git
 cd gaokao-vault
 
+# 配置运行时密钥（不会进入镜像层；.dockerignore 排除 .env）
+cp .env.example .env
+# 编辑 .env，填入 PostgreSQL / OpenAI / S3 等运行时配置
+
 # 启动 PostgreSQL
 docker compose up -d db
 
@@ -39,7 +43,7 @@ docker compose run --rm crawler init-db
 # 全量抓取
 docker compose run --rm crawler crawl --mode full
 
-# 启动常驻定时调度（默认北京时间每天 00:00 增量抓取）
+# 启动常驻定时调度（默认北京时间每天 23:00 增量抓取）
 docker compose up -d scheduler
 
 # 查看任务状态
@@ -66,6 +70,8 @@ docker compose run --rm crawler run-spider schools -v
 ```
 
 数据持久化在 Docker volume 中（`pgdata` 存数据库，`crawl_data` 存断点文件），`docker compose down` 不会丢数据。彻底清理用 `docker compose down -v`。
+
+密钥边界：镜像构建不复制 `.env`；Compose 只在运行时注入环境变量。若旧构建可能已污染镜像层/缓存，先清理旧镜像与 BuildKit 缓存，再轮换 OpenAI/数据库/S3 凭据后重建。详见[快速开始](docs/getting-started.md#docker-构建与密钥边界)。
 
 ## 本地安装
 
@@ -102,20 +108,20 @@ GAOKAO_DB__POOL_MAX=20
 
 # 代理配置（可选）
 GAOKAO_PROXY__STATIC_PROXIES=[]
-GAOKAO_PROXY__USE_FREEPROXY=false
+GAOKAO_PROXY__USE_FREEPROXY=true
 
 # 爬取参数
-GAOKAO_CRAWL__CONCURRENCY=5
-GAOKAO_CRAWL__BASE_DELAY=1.0
+GAOKAO_CRAWL__CONCURRENCY=2
+GAOKAO_CRAWL__BASE_DELAY=2.0
 
-# 定时调度（固定按北京时间解析，默认每天 00:00）
-GAOKAO_SCHEDULE__CRON="0 0 * * *"
+# 定时调度（固定按北京时间解析，示例覆盖默认值 23:00）
+GAOKAO_SCHEDULE__CRON="0 23 * * *"
 ```
 
 ### 使用
 
 ```bash
-# 初始化数据库（18 张表 + 种子数据）
+# 初始化数据库（24 张表 + 种子数据）
 gaokao-vault init-db
 
 # 全量抓取（三阶段自动编排）
