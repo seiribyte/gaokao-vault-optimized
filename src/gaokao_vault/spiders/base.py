@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, ClassVar, cast
@@ -65,6 +66,7 @@ class BaseGaokaoSpider(Spider):
         super().__init__(**kwargs)
         self._db_config = db_config
         self._local_pool: asyncpg.Pool | None = None
+        self._pool_lock = asyncio.Lock()
         self.crawl_task_id = crawl_task_id
         self.mode = mode
         self._stats: dict[str, int] = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
@@ -81,7 +83,9 @@ class BaseGaokaoSpider(Spider):
     async def _get_pool(self) -> asyncpg.Pool:
         """Lazily create a local asyncpg pool bound to the current event loop."""
         if self._local_pool is None:
-            self._local_pool = await create_local_pool(self._db_config)
+            async with self._pool_lock:
+                if self._local_pool is None:
+                    self._local_pool = await create_local_pool(self._db_config)
         return self._local_pool
 
     # ------------------------------------------------------------------
@@ -240,17 +244,20 @@ class BaseGaokaoSpider(Spider):
     async def on_close(self) -> None:
         from gaokao_vault.db.queries.crawl_meta import update_task_stats
 
-        await update_task_stats(await self._get_pool(), self.crawl_task_id, self._stats)
-        logger.info(
-            "Spider %s finished: new=%d updated=%d unchanged=%d failed=%d",
-            self.name,
-            self._stats["new"],
-            self._stats["updated"],
-            self._stats["unchanged"],
-            self._stats["failed"],
-        )
-        if self._local_pool is not None:
-            await self._local_pool.close()
+        pool = await self._get_pool()
+        try:
+            await update_task_stats(pool, self.crawl_task_id, self._stats)
+            logger.info(
+                "Spider %s finished: new=%d updated=%d unchanged=%d failed=%d",
+                self.name,
+                self._stats["new"],
+                self._stats["updated"],
+                self._stats["unchanged"],
+                self._stats["failed"],
+            )
+        finally:
+            self._local_pool = None
+            await pool.close()
 
     async def parse(self, response: Response):
         raise NotImplementedError

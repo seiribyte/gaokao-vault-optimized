@@ -41,45 +41,20 @@ class VisionAnalyzer:
 
         Returns an empty list on any failure (timeout, non-JSON response, etc.).
         """
-        image_url = await asyncio.to_thread(self._resolve_image_url, image_path, province_name, year)
+        image_url, temporary_key = await asyncio.to_thread(self._resolve_image_url, image_path, province_name, year)
         if image_url is None:
             return []
 
         prompt = self._build_prompt(province_name, year)
-
         try:
-            input_msg: EasyInputMessageParam = {
-                "role": "user",
-                "content": [
-                    ResponseInputTextParam(type="input_text", text=prompt),
-                    ResponseInputImageParam(
-                        type="input_image",
-                        detail="auto",
-                        image_url=image_url,
-                    ),
-                ],
-            }
-            # Use streaming to work around proxies that don't populate the
-            # non-streaming ``output`` field but do send text via SSE deltas.
-            stream = await self.client.responses.create(
-                model=self._model,
-                input=[input_msg],
-                stream=True,
+            return await self.analyze_image_url(
+                image_url,
+                prompt=prompt,
+                province_name=province_name,
+                year=year,
             )
-            content = ""
-            async for event in stream:
-                if event.type == "response.output_text.delta":
-                    content += event.delta
-            await stream.close()
-            content = content.strip()
-        except Exception:
-            logger.exception("Vision API call failed for %s %d", province_name, year)
-            return []
-
-        if not content:
-            logger.warning("Vision API returned empty content for %s %d", province_name, year)
-            return []
-        return self._parse_response(content, province_name, year)
+        finally:
+            await self._delete_temporary_object(temporary_key)
 
     async def analyze_image_url(
         self,
@@ -102,17 +77,7 @@ class VisionAnalyzer:
                     ),
                 ],
             }
-            stream = await self.client.responses.create(
-                model=self._model,
-                input=[input_msg],
-                stream=True,
-            )
-            content = ""
-            async for event in stream:
-                if event.type == "response.output_text.delta":
-                    content += event.delta
-            await stream.close()
-            content = content.strip()
+            content = (await self._collect_response_text(input_msg)).strip()
         except Exception:
             logger.exception(
                 "Vision API call failed for image URL %s (%s %d)",
@@ -132,9 +97,31 @@ class VisionAnalyzer:
             return []
         return self._parse_response(content, province_name, year)
 
-    def _resolve_image_url(self, image_path: Path, province_name: str, year: int) -> str | None:
+    async def _collect_response_text(self, input_msg: EasyInputMessageParam) -> str:
+        # Streaming works around proxies that omit the non-streaming output field.
+        stream = await self.client.responses.create(model=self._model, input=[input_msg], stream=True)
+        try:
+            content = ""
+            async for event in stream:
+                if event.type == "response.output_text.delta":
+                    content += event.delta
+            return content
+        finally:
+            await stream.close()
+
+    async def close(self) -> None:
+        await self.client.close()
+
+    async def __aenter__(self) -> VisionAnalyzer:
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
+
+    def _resolve_image_url(self, image_path: Path, province_name: str, year: int) -> tuple[str | None, str | None]:
         """Upload to S3 and return presigned URL, or fall back to base64 data URL."""
         if self._s3:
+            key: str | None = None
             try:
                 key = f"screenshots/{province_name}/{year}/{image_path.name}"
                 self._s3.upload_image(image_path, key)
@@ -142,16 +129,29 @@ class VisionAnalyzer:
                 logger.debug("Using S3 presigned URL for %s", image_path.name)
             except Exception:
                 logger.exception("S3 upload failed for %s, falling back to base64", image_path)
+                if key is not None:
+                    try:
+                        self._s3.delete_image(key)
+                    except Exception:
+                        logger.exception("Failed to delete incomplete S3 upload %s", key)
             else:
-                return url
+                return url, key
 
         try:
             image_b64 = self._encode_image(image_path)
         except Exception:
             logger.exception("Failed to read image %s", image_path)
-            return None
+            return None, None
         else:
-            return f"data:image/png;base64,{image_b64}"
+            return f"data:image/png;base64,{image_b64}", None
+
+    async def _delete_temporary_object(self, key: str | None) -> None:
+        if key is None or self._s3 is None:
+            return
+        try:
+            await asyncio.to_thread(self._s3.delete_image, key)
+        except Exception:
+            logger.exception("Failed to delete temporary S3 object %s", key)
 
     # ------------------------------------------------------------------
     # Internal helpers
