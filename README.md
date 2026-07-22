@@ -43,7 +43,7 @@ docker compose run --rm crawler init-db
 # 全量抓取
 docker compose run --rm crawler crawl --mode full
 
-# 启动常驻定时调度（默认北京时间每天 00:00 增量抓取）
+# 启动常驻定时调度（默认北京时间每天 23:00 增量抓取）
 docker compose up -d scheduler
 
 # 查看任务状态
@@ -108,20 +108,20 @@ GAOKAO_DB__POOL_MAX=20
 
 # 代理配置（可选）
 GAOKAO_PROXY__STATIC_PROXIES=[]
-GAOKAO_PROXY__USE_FREEPROXY=false
+GAOKAO_PROXY__USE_FREEPROXY=true
 
 # 爬取参数
-GAOKAO_CRAWL__CONCURRENCY=5
-GAOKAO_CRAWL__BASE_DELAY=1.0
+GAOKAO_CRAWL__CONCURRENCY=2
+GAOKAO_CRAWL__BASE_DELAY=2.0
 
-# 定时调度（固定按北京时间解析，默认每天 00:00）
-GAOKAO_SCHEDULE__CRON="0 0 * * *"
+# 定时调度（固定按北京时间解析，示例覆盖默认值 23:00）
+GAOKAO_SCHEDULE__CRON="0 23 * * *"
 ```
 
 ### 使用
 
 ```bash
-# 初始化数据库（18 张表 + 种子数据）
+# 初始化数据库（24 张表 + 种子数据）
 gaokao-vault init-db
 
 # 全量抓取（三阶段自动编排）

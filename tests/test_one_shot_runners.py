@@ -19,6 +19,12 @@ def test_all_one_shot_entity_writes_use_canonical_pipeline() -> None:
         assert "validate_item" in source
 
 
+def test_all_one_shot_runners_import_without_starting_network_work() -> None:
+    for path in sorted(Path("scripts").glob("crawl_*_once.py")):
+        namespace = runpy.run_path(str(path))
+        assert callable(namespace["main"])
+
+
 def test_enrollment_runner_passes_full_canonical_identity() -> None:
     _, conn, _ = make_mock_pool_and_conn()
     stats = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}

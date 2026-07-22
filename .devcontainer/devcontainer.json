@@ -1,9 +1,6 @@
 {
     "name": "gaokao-vault",
     "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
-    "runArgs": [
-        "--userns=keep-id"
-    ],
     "features": {
         "ghcr.io/devcontainers/features/postgresql:1": {
             "version": "18"

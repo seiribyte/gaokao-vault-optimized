@@ -65,7 +65,7 @@ def http_get(url: str) -> str | None:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             time.sleep(REQUEST_SLEEP_SEC)
-            req = Request(url, headers=HTTP_HEADERS)
+            req = Request(url, headers=HTTP_HEADERS)  # noqa: S310 - fixed CHSI host
             with urlopen(req, timeout=40) as resp:  # noqa: S310 — fixed CHSI host
                 if resp.status != 200:
                     time.sleep(attempt)

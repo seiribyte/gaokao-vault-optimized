@@ -79,9 +79,9 @@ cp .env.example .env
 | `GAOKAO_DB__POOL_MIN` | 连接池最小连接数 | `5` |
 | `GAOKAO_DB__POOL_MAX` | 连接池最大连接数 | `20` |
 | `GAOKAO_PROXY__STATIC_PROXIES` | 付费代理列表 (JSON) | `[]` |
-| `GAOKAO_PROXY__USE_FREEPROXY` | 是否启用免费代理 | `false` |
-| `GAOKAO_CRAWL__CONCURRENCY` | 并发请求数 | `5` |
-| `GAOKAO_CRAWL__BASE_DELAY` | 请求基础延迟(秒) | `1.0` |
+| `GAOKAO_PROXY__USE_FREEPROXY` | 是否启用免费代理 | `true` |
+| `GAOKAO_CRAWL__CONCURRENCY` | 并发请求数 | `2` |
+| `GAOKAO_CRAWL__BASE_DELAY` | 请求基础延迟(秒) | `2.0` |
 | `OPENAI_API_BASE` | OpenAI API 地址 | `https://api.openai.com/v1` |
 | `OPENAI_API_KEY` | OpenAI API 密钥 | （必填，用于分数线截图 AI 分析） |
 
@@ -115,7 +115,7 @@ gaokao-vault healthcheck
 
 ### 健康检查
 
-`gaokao-vault healthcheck` 命令通过调用 OpenAI `/models` 端点（只读、零 token 消耗）来验证 API 配置是否正确：
+`gaokao-vault healthcheck` 命令通过调用 OpenAI Responses API 的最小流式请求来验证 API 配置。探针请求最多生成 5 个 output tokens，因此会产生实际 API 调用和用量：
 
 - 成功时输出 `ok` 到 stdout，退出码 0
 - 失败时输出错误信息到 stderr，退出码 1（如 key 未配置、认证失败、超时、连接失败等）

@@ -9,8 +9,8 @@ def _normalize_sql(sql: str) -> str:
 
 
 def test_reference_seeds_replay_authoritative_fields_on_name_conflict() -> None:
-    provinces_sql = _normalize_sql(Path("src/gaokao_vault/db/seed_provinces.sql").read_text())
-    categories_sql = _normalize_sql(Path("src/gaokao_vault/db/seed_subject_categories.sql").read_text())
+    provinces_sql = _normalize_sql(Path("src/gaokao_vault/db/seed_provinces.sql").read_text(encoding="utf-8"))
+    categories_sql = _normalize_sql(Path("src/gaokao_vault/db/seed_subject_categories.sql").read_text(encoding="utf-8"))
 
     assert "ON CONFLICT (name) DO UPDATE SET code = EXCLUDED.code" in provinces_sql
     assert "region = EXCLUDED.region" in provinces_sql
@@ -22,7 +22,7 @@ def test_reference_seeds_replay_authoritative_fields_on_name_conflict() -> None:
 
 
 def test_enrollment_plans_existing_tables_get_conflict_target_index() -> None:
-    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8"))
 
     assert "DROP INDEX IF EXISTS idx_enrollment_plans_unique_key" in schema_sql
     assert "CREATE UNIQUE INDEX idx_enrollment_plans_unique_key" in schema_sql
@@ -36,7 +36,7 @@ def test_enrollment_plans_existing_tables_get_conflict_target_index() -> None:
 
 
 def test_school_and_admission_source_identities_are_migrated() -> None:
-    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8"))
 
     assert "ALTER TABLE schools ADD COLUMN IF NOT EXISTS gaokao_school_id INTEGER" in schema_sql
     assert "ON schools(gaokao_school_id) WHERE gaokao_school_id IS NOT NULL" in schema_sql
@@ -49,7 +49,7 @@ def test_school_and_admission_source_identities_are_migrated() -> None:
 
 
 def test_school_majors_existing_tables_get_school_major_strength_columns() -> None:
-    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8")
 
     assert "school_major_display_order INTEGER" in schema_sql
     assert "major_strength_rank INTEGER" in schema_sql
@@ -81,7 +81,7 @@ def test_school_majors_existing_tables_get_school_major_strength_columns() -> No
 
 
 def test_school_majors_strength_index_is_created_after_existing_table_columns_are_added() -> None:
-    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8"))
 
     featured_index_sql = (
         "CREATE INDEX IF NOT EXISTS idx_school_majors_featured "
@@ -106,7 +106,7 @@ def test_school_majors_strength_index_is_created_after_existing_table_columns_ar
 
 
 def test_school_major_strength_signals_table_is_declared() -> None:
-    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8")
 
     assert "CREATE TABLE IF NOT EXISTS school_major_strength_signals" in schema_sql
     assert "signal_type     VARCHAR(50) NOT NULL" in schema_sql
@@ -117,7 +117,7 @@ def test_school_major_strength_signals_table_is_declared() -> None:
 
 
 def test_major_admission_results_tracks_min_rank_source() -> None:
-    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8")
 
     for column_sql in (
         "min_rank_source VARCHAR(50)",
@@ -131,7 +131,7 @@ def test_major_admission_results_tracks_min_rank_source() -> None:
 
 
 def test_special_enrollments_existing_tables_get_null_safe_conflict_target_index() -> None:
-    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8")
 
     assert "DROP INDEX IF EXISTS idx_special_enrollments_unique_key" in schema_sql
     assert "CREATE UNIQUE INDEX idx_special_enrollments_unique_key" in schema_sql
@@ -143,14 +143,14 @@ def test_special_enrollments_existing_tables_get_null_safe_conflict_target_index
 
 
 def test_special_enrollments_existing_tables_get_content_text_column() -> None:
-    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8")
 
     assert "content_text    TEXT" in schema_sql
     assert "ALTER TABLE special_enrollments ADD COLUMN IF NOT EXISTS content_text TEXT" in schema_sql
 
 
 def test_special_enrollments_existing_tables_get_chsi_strong_base_lineage_columns() -> None:
-    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8")
 
     for column_sql in (
         "school_code_raw VARCHAR(50)",
@@ -164,7 +164,7 @@ def test_special_enrollments_existing_tables_get_chsi_strong_base_lineage_column
 
 
 def test_volunteer_timelines_batch_accepts_long_source_labels() -> None:
-    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8")
 
     assert re.search(
         r"CREATE TABLE IF NOT EXISTS volunteer_timelines \(.+?batch\s+VARCHAR\(255\) NOT NULL",
@@ -175,7 +175,7 @@ def test_volunteer_timelines_batch_accepts_long_source_labels() -> None:
 
 
 def test_source_lineage_tables_are_declared() -> None:
-    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8")
 
     assert "CREATE TABLE IF NOT EXISTS data_sources" in schema_sql
     assert "CREATE TABLE IF NOT EXISTS source_documents" in schema_sql
@@ -192,7 +192,7 @@ def test_source_lineage_tables_are_declared() -> None:
 
 
 def test_vector_documents_view_is_declared() -> None:
-    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text()
+    schema_sql = Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8")
 
     assert "CREATE OR REPLACE VIEW gaokao_source.vector_documents_v AS" in schema_sql
     assert "CREATE OR REPLACE VIEW gaokao_source.vector_documents_source_v AS" in schema_sql
@@ -211,7 +211,7 @@ def test_vector_documents_view_is_declared() -> None:
 
 
 def test_school_source_view_does_not_guess_unknown_ownership() -> None:
-    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8"))
 
     assert "WHEN s.is_sino_foreign THEN '中外合作办学'" in schema_sql
     assert "WHEN s.crawl_task_id IS NOT NULL THEN '公办'" in schema_sql
@@ -219,7 +219,7 @@ def test_school_source_view_does_not_guess_unknown_ownership() -> None:
 
 
 def test_admission_records_view_is_dropped_before_recreate_to_allow_column_order_changes() -> None:
-    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8"))
     drop_view_sql = "DROP VIEW IF EXISTS gaokao_source.admission_records_v"
     create_view_sql = "CREATE OR REPLACE VIEW gaokao_source.admission_records_v AS"
 
@@ -231,7 +231,7 @@ def test_admission_records_view_is_dropped_before_recreate_to_allow_column_order
 
 
 def test_admission_records_view_appends_min_rank_provenance_to_preserve_existing_column_order() -> None:
-    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8"))
 
     assert "mar.min_rank, mar.plan_count" in schema_sql
     assert "NULL::INTEGER AS min_rank, ep.plan_count" in schema_sql
@@ -243,7 +243,7 @@ def test_admission_records_view_appends_min_rank_provenance_to_preserve_existing
 
 
 def test_score_segments_use_null_safe_unique_identity_and_cleanup_duplicates() -> None:
-    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8"))
 
     assert "DROP CONSTRAINT IF EXISTS score_segments_province_id_year_subject_category_id_score_key" in schema_sql
     assert "PARTITION BY province_id, year, subject_category_id, score" in schema_sql
@@ -252,7 +252,7 @@ def test_score_segments_use_null_safe_unique_identity_and_cleanup_duplicates() -
 
 
 def test_score_lines_use_null_safe_unique_identity_and_cleanup_duplicates() -> None:
-    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text(encoding="utf-8"))
 
     assert (
         "DROP CONSTRAINT IF EXISTS admission_score_lines_province_id_year_subject_category_id_batch_special_name_key"
