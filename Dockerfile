@@ -10,11 +10,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies first (layer cache)
-COPY uv.lock pyproject.toml /app/
+COPY uv.lock pyproject.toml README.md /app/
 RUN uv sync --frozen --no-install-project
 
-# Copy source and install project
-COPY . /app
+# Copy only package sources required to install and run the project
+COPY src /app/src
 RUN uv sync --frozen
 
 # Install Scrapling browser dependencies (Playwright chromium etc.)

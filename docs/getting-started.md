@@ -33,6 +33,25 @@ docker compose run --rm crawler status
 
 数据持久化在 Docker volume 中，`docker compose down` 不会丢数据。彻底清理用 `docker compose down -v`。
 
+### Docker 构建与密钥边界
+
+镜像构建只接收运行所需文件（`src/`、`pyproject.toml`、`uv.lock`、`README.md`）。
+根目录 `.dockerignore` 会排除 `.env`、`.git/`、`.venv/`、`crawl_data/`、测试与本地工作区。
+
+Compose 通过 `env_file: .env` 在**容器启动时**注入环境变量；`.env` 不会被复制进镜像层。
+新构建的镜像不代表历史镜像/构建缓存已经清理。
+
+如果本地或部署主机曾经用包含真实 `.env` 的目录执行过 `docker compose build`，按下面清单处理：
+
+1. 停止相关服务并删除本项目本地构建的镜像：`docker compose down --rmi local`
+2. 查看 BuildKit 缓存占用：`docker builder du`
+3. 确认主机上没有其他构建依赖这些缓存后，再交互式执行 `docker builder prune`
+4. 轮换可能曾进入上下文的 OpenAI、数据库、S3/MinIO 凭据
+5. 将**新凭据**只写入运行时 `.env` 或平台 secret，不要提交到 Git
+6. 重新构建并启动：`docker compose build crawler scheduler && docker compose up -d`
+
+真实凭据轮换由操作者完成；仓库文档只提供清单，不保存或传输密钥。
+
 ## 方式二：本地安装
 
 ### 安装依赖
