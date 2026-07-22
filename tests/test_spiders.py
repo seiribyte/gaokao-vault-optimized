@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import MagicMock
+
 from gaokao_vault.constants import TaskType
 from gaokao_vault.scheduler.orchestrator import SPIDER_MAP
 from gaokao_vault.spiders import (
@@ -26,6 +29,14 @@ from gaokao_vault.spiders.provincial_announcement_spider import ProvincialAnnoun
 
 
 class TestSpiderStructure:
+    def test_on_error_increments_failed_stats(self):
+        spider = object.__new__(BaseGaokaoSpider)
+        spider._stats = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
+
+        asyncio.run(spider.on_error(MagicMock(url="https://example.invalid"), RuntimeError("boom")))
+
+        assert spider._stats["failed"] == 1
+
     def test_all_spiders_have_name(self):
         spiders = [
             SchoolSpider,

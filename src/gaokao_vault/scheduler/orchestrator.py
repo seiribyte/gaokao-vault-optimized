@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any
 
 import asyncpg
@@ -31,6 +32,30 @@ from gaokao_vault.spiders.timeline_spider import TimelineSpider
 
 logger = logging.getLogger(__name__)
 _TIMEOUT_PAUSE_DRAIN_SECONDS = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlOutcome:
+    """Operator-visible result for one or more orchestrated crawl phases."""
+
+    total: int
+    failed: int
+    completed: bool
+    phase3_skipped: bool = False
+    error: str | None = None
+
+    @property
+    def successful(self) -> bool:
+        return self.completed and self.failed == 0 and not self.phase3_skipped and self.error is None
+
+    def describe_failure(self) -> str:
+        if self.error:
+            return self.error
+        if self.phase3_skipped:
+            return "Phase 3 skipped because Phase 2 was not stable"
+        if not self.completed:
+            return "Crawl phase did not complete"
+        return f"Crawl completed with {self.failed} failed task(s)"
 
 
 SPIDER_MAP: dict[str, type[BaseGaokaoSpider]] = {
@@ -76,34 +101,51 @@ class Orchestrator:
         self._app_config = app_config
         self.task_manager = TaskManager(db_pool)
 
-    async def run_all(self) -> None:
+    async def run_all(self) -> CrawlOutcome:
         logger.info("Starting full crawl orchestration (mode=%s)", self.mode)
 
         logger.info("=== Phase 2: Core entities ===")
         p2_results = await self._run_phase([t.value for t in PHASE2_TYPES])
-        stable, failed, total = self._phase_summary(p2_results)
-        if not stable:
+        p2_outcome = self._phase_outcome(p2_results, len(PHASE2_TYPES), phase_name="Phase 2")
+        if not p2_outcome.successful:
             logger.warning(
                 "Skipping Phase 3 because Phase 2 is not stable (failed=%d total=%d)",
-                failed,
-                total,
+                p2_outcome.failed,
+                p2_outcome.total,
             )
-            return
+            return CrawlOutcome(
+                total=p2_outcome.total,
+                failed=p2_outcome.failed,
+                completed=p2_outcome.completed,
+                phase3_skipped=True,
+                error=p2_outcome.error,
+            )
 
         logger.info("=== Phase 3: Associations ===")
-        await self._run_phase([t.value for t in PHASE3_TYPES])
+        p3_outcome = self._phase_outcome(
+            await self._run_phase([t.value for t in PHASE3_TYPES]),
+            len(PHASE3_TYPES),
+            phase_name="Phase 3",
+        )
 
         logger.info("Crawl orchestration complete")
+        return CrawlOutcome(
+            total=p2_outcome.total + p3_outcome.total,
+            failed=p2_outcome.failed + p3_outcome.failed,
+            completed=p2_outcome.completed and p3_outcome.completed,
+            error=p3_outcome.error,
+        )
 
-    async def run_types(self, types: list[str]) -> None:
+    async def run_types(self, types: list[str]) -> CrawlOutcome:
         logger.info("Running selected types: %s", types)
-        await self._run_phase(types)
+        valid_types = [t for t in types if t in SPIDER_MAP]
+        return self._phase_outcome(await self._run_phase(types), len(valid_types), phase_name="Selected crawl")
 
-    async def run_independent(self, types: list[str], *, max_concurrent: int | None = None) -> list | None:
+    async def run_independent(self, types: list[str], *, max_concurrent: int | None = None) -> CrawlOutcome:
         logger.info("Running independent types: %s max_concurrent=%s", types, max_concurrent or "unlimited")
         valid_types = [t for t in types if t in SPIDER_MAP]
         if not valid_types:
-            return None
+            return CrawlOutcome(total=0, failed=0, completed=True, error="No valid task types selected")
 
         semaphore = asyncio.Semaphore(max_concurrent) if max_concurrent is not None and max_concurrent > 0 else None
 
@@ -122,7 +164,7 @@ class Orchestrator:
                 logger.error("Independent task %s failed: %s", task_type, result)
             else:
                 logger.info("Independent task %s stats: %s", task_type, result)
-        return results
+        return self._phase_outcome(results, len(valid_types), phase_name="Independent crawl")
 
     async def run_single(self, task_type: str) -> dict[str, int]:
         spider_cls = SPIDER_MAP.get(task_type)
@@ -245,16 +287,33 @@ class Orchestrator:
             pass  # items are processed in spider callbacks via process_item
 
     @staticmethod
-    def _phase_summary(results: list | None) -> tuple[bool, int, int]:
+    def _phase_outcome(results: list | None, expected: int, *, phase_name: str) -> CrawlOutcome:
         if results is None:
-            return False, 0, 0
+            return CrawlOutcome(
+                total=expected,
+                failed=expected,
+                completed=False,
+                error=f"{phase_name} timed out or did not complete",
+            )
 
         failed = sum(
             1
             for result in results
             if isinstance(result, Exception) or not isinstance(result, dict) or result.get("failed", 0) > 0
         )
-        return failed == 0, failed, len(results)
+        return CrawlOutcome(
+            total=expected,
+            failed=failed,
+            completed=True,
+            error=None if failed == 0 else f"{phase_name} completed with {failed} failed task(s)",
+        )
+
+    @staticmethod
+    def _phase_summary(results: list | None) -> tuple[bool, int, int]:
+        """Keep the tuple helper for callers that only need phase stability."""
+        expected = len(results) if results is not None else 0
+        outcome = Orchestrator._phase_outcome(results, expected, phase_name="Phase")
+        return outcome.successful, outcome.failed, outcome.total
 
     async def _run_phase(self, task_types: list[str]) -> list | None:
         valid_types = [t for t in task_types if t in SPIDER_MAP]

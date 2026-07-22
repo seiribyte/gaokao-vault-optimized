@@ -406,9 +406,12 @@ class TestPhaseOrderingPreservation:
         run_single = AsyncMock(side_effect=[{"failed": 0}, {"failed": 1}])
 
         with patch.object(orch, "run_single", new=run_single):
-            results = asyncio.run(orch.run_independent(["enrollment_plans", "special", "unknown"]))
+            outcome = asyncio.run(orch.run_independent(["enrollment_plans", "special", "unknown"]))
 
-        assert results == [{"failed": 0}, {"failed": 1}]
+        assert outcome.total == 2
+        assert outcome.failed == 1
+        assert outcome.completed is True
+        assert outcome.successful is False
         assert run_single.await_count == 2
         assert [call.args[0] for call in run_single.await_args_list] == ["enrollment_plans", "special"]
 
@@ -429,14 +432,16 @@ class TestPhaseOrderingPreservation:
             return {"failed": 0}
 
         with patch.object(orch, "run_single", new=AsyncMock(side_effect=_run_single)):
-            results = asyncio.run(
+            outcome = asyncio.run(
                 orch.run_independent(
                     ["schools", "majors", "enrollment_plans", "special"],
                     max_concurrent=2,
                 )
             )
 
-        assert len(results or []) == 4
+        assert outcome.total == 4
+        assert outcome.failed == 0
+        assert outcome.successful is True
         assert max_seen == 2
 
 

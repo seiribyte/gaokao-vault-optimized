@@ -191,7 +191,8 @@ class BaseGaokaoSpider(Spider):
         return request
 
     async def on_error(self, request: Request, error: Exception) -> None:
-        """Log request-level errors for debugging."""
+        """Record final request-level errors for task outcome aggregation."""
+        self._stats["failed"] += 1
         logger.error("Request failed: %s — %s: %s", request.url, type(error).__name__, error)
 
     def _maybe_heartbeat(self) -> None:

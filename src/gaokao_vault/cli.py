@@ -91,13 +91,20 @@ def crawl(
                 db_pool=pool, config=config.crawl, mode=mode, db_config=config.db, app_config=config
             )
             if types:
-                await orchestrator.run_types(types)
+                outcome = await orchestrator.run_types(types)
             else:
-                await orchestrator.run_all()
+                outcome = await orchestrator.run_all()
+            if not outcome.successful:
+                raise RuntimeError(outcome.describe_failure())
         finally:
             await close_pool()
 
-    asyncio.run(_run())
+    try:
+        asyncio.run(_run())
+    except (ValueError, RuntimeError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo("Crawl finished successfully")
 
 
 @app.command()
