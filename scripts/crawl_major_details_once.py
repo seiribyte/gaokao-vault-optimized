@@ -18,7 +18,10 @@ from scrapling.fetchers import AsyncStealthySession
 
 from gaokao_vault.config import DatabaseConfig
 from gaokao_vault.db.queries.majors import upsert_major
+from gaokao_vault.models.major import MajorItem
+from gaokao_vault.pipeline.dedup import deduplicate_and_persist_on_connection
 from gaokao_vault.pipeline.hasher import compute_content_hash
+from gaokao_vault.pipeline.validator import validate_item
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,7 +59,7 @@ def _extract_fields(msg: dict[str, Any]) -> dict[str, str | None]:
     zyjs = msg.get("zyjs") or {}
     description = None
     if isinstance(zyjs, dict):
-        description = (zyjs.get("desc") or zyjs.get("versionDesc") or None)
+        description = zyjs.get("desc") or zyjs.get("versionDesc") or None
         if isinstance(description, str):
             description = description.strip() or None
 
@@ -162,32 +165,20 @@ async def main() -> int:
                     "employment_rate": row["employment_rate"],
                     "graduate_directions": extracted["graduate_directions"] or row["graduate_directions"],
                 }
-                content_hash = compute_content_hash(item)
-                item["content_hash"] = content_hash
-                item["crawl_task_id"] = task_id
-
-                if row["content_hash"] == content_hash and row["description"] and row["graduate_directions"]:
-                    stats["unchanged"] += 1
-                else:
-                    await upsert_major(conn, item)
-                    if row["content_hash"] is None:
-                        stats["new"] += 1
-                        change = "new"
-                    else:
-                        stats["updated"] += 1
-                        change = "updated"
-                    await conn.execute(
-                        """
-                        INSERT INTO crawl_snapshots
-                            (entity_type, entity_id, content_hash, change_type, crawl_task_id, snapshot_data)
-                        VALUES ('majors', $1, $2, $3, $4, $5::jsonb)
-                        """,
-                        row["id"],
-                        content_hash,
-                        change,
-                        task_id,
-                        json.dumps(item, ensure_ascii=False, default=str),
-                    )
+                validated = validate_item(MajorItem, item)
+                if validated is None:
+                    stats["failed"] += 1
+                    continue
+                change = await deduplicate_and_persist_on_connection(
+                    conn,
+                    entity_type="majors",
+                    item=validated,
+                    content_hash=compute_content_hash(validated),
+                    unique_keys={"code": validated["code"], "education_level": validated["education_level"]},
+                    crawl_task_id=task_id,
+                    upsert_fn=upsert_major,
+                )
+                stats[change] += 1
 
                 if idx % 25 == 0 or idx == len(rows):
                     logger.info("progress %d/%d stats=%s", idx, len(rows), stats)

@@ -22,7 +22,10 @@ from gaokao_vault.db.queries.majors import (
     upsert_major_category,
     upsert_major_subcategory,
 )
+from gaokao_vault.models.major import MajorItem
+from gaokao_vault.pipeline.dedup import deduplicate_and_persist_on_connection
 from gaokao_vault.pipeline.hasher import compute_content_hash
+from gaokao_vault.pipeline.validator import validate_item
 
 logging.basicConfig(
     level=logging.INFO,
@@ -103,44 +106,20 @@ async def persist_major(
     task_id: int,
     stats: dict[str, int],
 ) -> None:
-    content_hash = compute_content_hash(item)
-    item = {**item, "content_hash": content_hash, "crawl_task_id": task_id}
-
-    existing = await conn.fetchrow(
-        "SELECT id, content_hash FROM majors WHERE code = $1 AND education_level = $2",
-        item.get("code"),
-        item["education_level"],
+    validated = validate_item(MajorItem, item)
+    if validated is None:
+        stats["failed"] += 1
+        return
+    change = await deduplicate_and_persist_on_connection(
+        conn,
+        entity_type="majors",
+        item=validated,
+        content_hash=compute_content_hash(validated),
+        unique_keys={"code": validated["code"], "education_level": validated["education_level"]},
+        crawl_task_id=task_id,
+        upsert_fn=upsert_major,
     )
-    await upsert_major(conn, item)
-    if existing is None:
-        stats["new"] += 1
-        change = "new"
-    elif existing["content_hash"] == content_hash:
-        stats["unchanged"] += 1
-        change = "unchanged"
-    else:
-        stats["updated"] += 1
-        change = "updated"
-
-    await conn.execute(
-        """
-        INSERT INTO crawl_snapshots (entity_type, entity_id, content_hash, change_type, crawl_task_id, snapshot_data)
-        VALUES (
-            'majors',
-            (SELECT id FROM majors WHERE code = $1 AND education_level = $2),
-            $3,
-            $4,
-            $5,
-            $6::jsonb
-        )
-        """,
-        item.get("code"),
-        item["education_level"],
-        content_hash,
-        change,
-        task_id,
-        json.dumps(item, ensure_ascii=False, default=str),
-    )
+    stats[change] += 1
 
 
 async def main() -> int:

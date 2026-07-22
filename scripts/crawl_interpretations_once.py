@@ -15,7 +15,10 @@ from scrapling.fetchers import AsyncStealthySession
 
 from gaokao_vault.config import DatabaseConfig
 from gaokao_vault.db.queries.majors import upsert_major_interpretation
+from gaokao_vault.models.major import MajorInterpretationItem
+from gaokao_vault.pipeline.dedup import deduplicate_and_persist_on_connection
 from gaokao_vault.pipeline.hasher import compute_content_hash
+from gaokao_vault.pipeline.validator import validate_item
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("crawl_interpretations_once")
@@ -161,44 +164,20 @@ async def main() -> int:
                         "publish_date": None,
                         "source_url": source_url[:255],
                     }
-                    content_hash = compute_content_hash(data)
-                    data["content_hash"] = content_hash
-                    data["crawl_task_id"] = task_id
-
-                    existing = await conn.fetchrow(
-                        "SELECT id, content_hash FROM major_interpretations WHERE major_id IS NOT DISTINCT FROM $1 AND title=$2",
-                        major_id,
-                        title[:200],
-                    )
-                    await upsert_major_interpretation(conn, data)
-                    if existing is None:
-                        stats["new"] += 1
-                        change = "new"
-                        entity_id = await conn.fetchval(
-                            "SELECT id FROM major_interpretations WHERE major_id IS NOT DISTINCT FROM $1 AND title=$2",
-                            major_id,
-                            title[:200],
-                        )
-                    elif existing["content_hash"] == content_hash:
-                        stats["unchanged"] += 1
+                    validated = validate_item(MajorInterpretationItem, data)
+                    if validated is None:
+                        stats["failed"] += 1
                         continue
-                    else:
-                        stats["updated"] += 1
-                        change = "updated"
-                        entity_id = existing["id"]
-
-                    await conn.execute(
-                        """
-                        INSERT INTO crawl_snapshots
-                          (entity_type, entity_id, content_hash, change_type, crawl_task_id, snapshot_data)
-                        VALUES ('major_interpretations', $1, $2, $3, $4, $5::jsonb)
-                        """,
-                        entity_id,
-                        content_hash,
-                        change,
-                        task_id,
-                        json.dumps(data, ensure_ascii=False, default=str),
+                    change = await deduplicate_and_persist_on_connection(
+                        conn,
+                        entity_type="major_interpretations",
+                        item=validated,
+                        content_hash=compute_content_hash(validated),
+                        unique_keys={"major_id": validated.get("major_id"), "title": validated.get("title")},
+                        crawl_task_id=task_id,
+                        upsert_fn=upsert_major_interpretation,
                     )
+                    stats[change] += 1
 
                 logger.info("progress start=%s seen=%s stats=%s", start, len(seen_ids), stats)
                 start += PAGE_SIZE

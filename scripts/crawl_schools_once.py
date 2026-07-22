@@ -8,7 +8,6 @@ few dozen schools. This script walks known-valid sch_id ranges directly.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -20,7 +19,10 @@ from scrapling.fetchers import AsyncStealthySession
 
 from gaokao_vault.config import DatabaseConfig
 from gaokao_vault.db.queries.schools import upsert_school
+from gaokao_vault.models.school import SchoolItem
+from gaokao_vault.pipeline.dedup import deduplicate_and_persist_on_connection
 from gaokao_vault.pipeline.hasher import compute_content_hash
+from gaokao_vault.pipeline.validator import validate_item
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,10 +34,9 @@ logger = logging.getLogger("crawl_schools_once")
 BASE = "https://gaokao.chsi.com.cn"
 DETAIL_URL = f"{BASE}/sch/schoolInfoMain--schId-{{sch_id}}.dhtml"
 
-# Empirical range: many valid IDs live in 1..2500; sparse after that.
+# Keep the same brute-force range as the canonical SchoolSpider.
 SCH_ID_START = 1
-SCH_ID_END = 2500
-MAX_CONSECUTIVE_MISS = 120
+SCH_ID_END = 5000
 _VARCHAR_LIMITS = {
     "name": 100,
     "city": 50,
@@ -70,7 +71,7 @@ def _extract_name(html: str) -> str:
         # fallback title: 北京大学_院校信息库_阳光高考
         t = re.search(r"<title>([^_<]+)_", html)
         return _clean(t.group(1)) if t else ""
-    texts = [ _clean(x) for x in re.findall(r">([^<>]+)<", m.group(1)) ]
+    texts = [_clean(x) for x in re.findall(r">([^<>]+)<", m.group(1))]
     for t in texts:
         if t and "关注" not in t and not t.isdigit():
             return t
@@ -205,7 +206,8 @@ async def resolve_province_id(conn: asyncpg.Connection, province_map: dict[str, 
         return None
     text = city.strip()
     simplified = (
-        text.replace("壮族自治区", "")
+        text
+        .replace("壮族自治区", "")
         .replace("回族自治区", "")
         .replace("维吾尔自治区", "")
         .replace("自治区", "")
@@ -229,17 +231,12 @@ async def main() -> int:
         rows = await conn.fetch("SELECT id, name FROM provinces")
         province_map = {r["name"]: r["id"] for r in rows}
 
-        resume_from = SCH_ID_START
         max_existing = await conn.fetchval("SELECT COALESCE(MAX(sch_id), 0) FROM schools")
-        if max_existing:
-            # Re-scan a small overlap window, then continue forward.
-            resume_from = max(SCH_ID_START, int(max_existing) - 5)
         logger.info(
-            "task_id=%s scanning sch_id %d..%d (resume_from=%d max_existing=%s)",
+            "task_id=%s scanning complete sch_id range %d..%d (max_existing=%s)",
             task_id,
             SCH_ID_START,
             SCH_ID_END,
-            resume_from,
             max_existing,
         )
 
@@ -254,8 +251,7 @@ async def main() -> int:
             warm = await session.fetch(f"{BASE}/sch/search--ss-on,option-qg,searchType-1,start-0.dhtml")
             logger.info("warmup status=%s", warm.status)
 
-            consecutive_miss = 0
-            for sch_id in range(resume_from, SCH_ID_END + 1):
+            for sch_id in range(SCH_ID_START, SCH_ID_END + 1):
                 url = DETAIL_URL.format(sch_id=sch_id)
                 try:
                     resp = await session.fetch(url)
@@ -263,63 +259,31 @@ async def main() -> int:
                 except Exception:
                     logger.exception("fetch failed sch_id=%s", sch_id)
                     stats["failed"] += 1
-                    consecutive_miss += 1
-                    if consecutive_miss >= MAX_CONSECUTIVE_MISS:
-                        logger.info("stop early after %d consecutive misses at sch_id=%d", consecutive_miss, sch_id)
-                        break
                     continue
 
                 try:
                     item = parse_school_html(html, sch_id)
                     if item is None:
-                        consecutive_miss += 1
-                        if consecutive_miss >= MAX_CONSECUTIVE_MISS and sch_id > 300:
-                            logger.info(
-                                "stop early after %d consecutive misses at sch_id=%d",
-                                consecutive_miss,
-                                sch_id,
-                            )
-                            break
                         continue
 
-                    consecutive_miss = 0
                     item["province_id"] = await resolve_province_id(conn, province_map, item.get("city"))
-                    content_hash = compute_content_hash(item)
-                    item["content_hash"] = content_hash
-                    item["crawl_task_id"] = task_id
-
-                    existing = await conn.fetchrow("SELECT id, content_hash FROM schools WHERE sch_id=$1", sch_id)
-                    await upsert_school(conn, item)
-                    if existing is None:
-                        stats["new"] += 1
-                        change = "new"
-                        entity_id = await conn.fetchval("SELECT id FROM schools WHERE sch_id=$1", sch_id)
-                    elif existing["content_hash"] == content_hash:
-                        stats["unchanged"] += 1
-                        change = "unchanged"
-                        entity_id = existing["id"]
-                    else:
-                        stats["updated"] += 1
-                        change = "updated"
-                        entity_id = existing["id"]
-
-                    if change != "unchanged":
-                        await conn.execute(
-                            """
-                            INSERT INTO crawl_snapshots
-                              (entity_type, entity_id, content_hash, change_type, crawl_task_id, snapshot_data)
-                            VALUES ('schools', $1, $2, $3, $4, $5::jsonb)
-                            """,
-                            entity_id,
-                            content_hash,
-                            change,
-                            task_id,
-                            json.dumps(item, ensure_ascii=False, default=str),
-                        )
+                    validated = validate_item(SchoolItem, item)
+                    if validated is None:
+                        stats["failed"] += 1
+                        continue
+                    change = await deduplicate_and_persist_on_connection(
+                        conn,
+                        entity_type="schools",
+                        item=validated,
+                        content_hash=compute_content_hash(validated),
+                        unique_keys={"sch_id": validated["sch_id"]},
+                        crawl_task_id=task_id,
+                        upsert_fn=upsert_school,
+                    )
+                    stats[change] += 1
                 except Exception:
                     logger.exception("persist failed sch_id=%s", sch_id)
                     stats["failed"] += 1
-                    consecutive_miss = 0
                     continue
 
                 total = stats["new"] + stats["updated"] + stats["unchanged"]

@@ -20,7 +20,10 @@ import asyncpg
 
 from gaokao_vault.config import DatabaseConfig
 from gaokao_vault.db.queries.enrollment import upsert_charter
+from gaokao_vault.models.enrollment import CharterItem
+from gaokao_vault.pipeline.dedup import deduplicate_and_persist_on_connection
 from gaokao_vault.pipeline.hasher import compute_content_hash
+from gaokao_vault.pipeline.validator import validate_item
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("crawl_charters_once")
@@ -102,16 +105,14 @@ def parse_list(html: str, sch_id: int) -> list[dict[str, Any]]:
                     year = publish_date.year
             except ValueError:
                 publish_date = None
-        items.append(
-            {
-                "info_id": info_id,
-                "sch_id": int(sch) if sch.isdigit() else sch_id,
-                "title": title[:200] if title else None,
-                "year": year,
-                "publish_date": publish_date,
-                "source_url": BASE + href,
-            }
-        )
+        items.append({
+            "info_id": info_id,
+            "sch_id": int(sch) if sch.isdigit() else sch_id,
+            "title": title[:200] if title else None,
+            "year": year,
+            "publish_date": publish_date,
+            "source_url": BASE + href,
+        })
     return items
 
 
@@ -172,12 +173,11 @@ async def main() -> int:
             SELECT s.id, s.sch_id, s.name
             FROM schools s
             WHERE s.sch_id IS NOT NULL
-              AND NOT EXISTS (SELECT 1 FROM admission_charters c WHERE c.school_id = s.id)
             ORDER BY s.id
             """
         )
         already = await conn.fetchval("SELECT count(*) FROM admission_charters")
-        logger.info("task_id=%s remaining_schools=%s already=%s", task_id, len(schools), already)
+        logger.info("task_id=%s schools_to_scan=%s already=%s", task_id, len(schools), already)
 
         loop = asyncio.get_running_loop()
         smoke_html = await loop.run_in_executor(pool, http_get, LIST_URL.format(sch_id=1))
@@ -228,29 +228,22 @@ async def main() -> int:
                     "content": content,
                     "publish_date": item.get("publish_date"),
                     "source_url": item["source_url"][:255],
-                    "content_hash": compute_content_hash(
-                        {
-                            "school_id": int(school["id"]),
-                            "year": year,
-                            "title": item.get("title"),
-                            "content": content,
-                        }
-                    ),
-                    "crawl_task_id": task_id,
                 }
                 try:
-                    before = await conn.fetchval(
-                        "SELECT content_hash FROM admission_charters WHERE school_id=$1 AND year=$2",
-                        data["school_id"],
-                        data["year"],
+                    validated = validate_item(CharterItem, data)
+                    if validated is None:
+                        stats["failed"] += 1
+                        continue
+                    change = await deduplicate_and_persist_on_connection(
+                        conn,
+                        entity_type="charters",
+                        item=validated,
+                        content_hash=compute_content_hash(validated),
+                        unique_keys={"school_id": validated["school_id"], "year": validated["year"]},
+                        crawl_task_id=task_id,
+                        upsert_fn=upsert_charter,
                     )
-                    await upsert_charter(conn, data)
-                    if before is None:
-                        stats["new"] += 1
-                    elif before == data["content_hash"]:
-                        stats["unchanged"] += 1
-                    else:
-                        stats["updated"] += 1
+                    stats[change] += 1
                 except Exception:
                     logger.exception(
                         "persist failed school=%s year=%s title=%s",

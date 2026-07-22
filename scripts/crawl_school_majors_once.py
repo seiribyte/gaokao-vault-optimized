@@ -21,7 +21,10 @@ from scrapling.fetchers import Fetcher
 
 from gaokao_vault.config import DatabaseConfig
 from gaokao_vault.db.queries.majors import upsert_school_major
+from gaokao_vault.models.major import SchoolMajorItem
+from gaokao_vault.pipeline.dedup import deduplicate_and_persist_on_connection
 from gaokao_vault.pipeline.hasher import compute_content_hash
+from gaokao_vault.pipeline.validator import validate_item
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("crawl_school_majors_once")
@@ -185,7 +188,10 @@ def iter_specials(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 def build_strength(item: dict[str, Any]) -> dict[str, Any]:
     # API uses "1" for yes on feature flags; "2" commonly means no.
-    featured = any(str(item.get(k)).strip() == "1" for k in ("nation_feature", "nation_first_class", "is_important", "province_feature"))
+    featured = any(
+        str(item.get(k)).strip() == "1"
+        for k in ("nation_feature", "nation_first_class", "is_important", "province_feature")
+    )
 
     evidence: list[dict[str, Any]] = []
     for field, label in (
@@ -260,7 +266,6 @@ async def main() -> int:
             """
             SELECT s.id, s.name
             FROM schools s
-            WHERE NOT EXISTS (SELECT 1 FROM school_majors sm WHERE sm.school_id = s.id)
             ORDER BY s.id
             """
         )
@@ -316,31 +321,25 @@ async def main() -> int:
                     "major_id": major_id,
                     "school_major_display_order": order,
                     **strength,
-                    "content_hash": compute_content_hash(
-                        {
-                            "school_id": int(school["id"]),
-                            "major_id": major_id,
-                            "special_id": item.get("special_id"),
-                            "code": code,
-                            "featured": strength["is_featured_major"],
-                            "tier": strength["major_strength_tier"],
-                        }
-                    ),
-                    "crawl_task_id": task_id,
                 }
                 try:
-                    before = await conn.fetchval(
-                        "SELECT content_hash FROM school_majors WHERE school_id=$1 AND major_id=$2",
-                        data["school_id"],
-                        data["major_id"],
+                    validated = validate_item(SchoolMajorItem, data)
+                    if validated is None:
+                        stats["failed"] += 1
+                        continue
+                    change = await deduplicate_and_persist_on_connection(
+                        conn,
+                        entity_type="school_majors",
+                        item=validated,
+                        content_hash=compute_content_hash(validated),
+                        unique_keys={
+                            "school_id": validated["school_id"],
+                            "major_id": validated["major_id"],
+                        },
+                        crawl_task_id=task_id,
+                        upsert_fn=upsert_school_major,
                     )
-                    await upsert_school_major(conn, data)
-                    if before is None:
-                        stats["new"] += 1
-                    elif before == data["content_hash"]:
-                        stats["unchanged"] += 1
-                    else:
-                        stats["updated"] += 1
+                    stats[change] += 1
                 except Exception:
                     logger.exception(
                         "persist failed school=%s major=%s code=%s",

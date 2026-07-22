@@ -5,11 +5,16 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from conftest import make_mock_pool_and_conn
 
 from gaokao_vault.models.school import SchoolItem
 from gaokao_vault.models.score import ScoreLineItem
-from gaokao_vault.pipeline.dedup import deduplicate_and_persist, deduplicate_score_segment_batch
+from gaokao_vault.pipeline.dedup import (
+    deduplicate_and_persist,
+    deduplicate_and_persist_on_connection,
+    deduplicate_score_segment_batch,
+)
 from gaokao_vault.pipeline.hasher import compute_content_hash
 from gaokao_vault.pipeline.validator import validate_item
 
@@ -120,6 +125,32 @@ class TestDedupPersistence:
         )
 
         assert result == "failed"
+
+    def test_connection_owned_dedup_rolls_back_when_snapshot_fails(self):
+        _, conn, transaction_context = make_mock_pool_and_conn()
+
+        with (
+            patch("gaokao_vault.pipeline.dedup.find_latest_hash", new=AsyncMock(return_value=(None, None))),
+            patch(
+                "gaokao_vault.pipeline.dedup.insert_snapshot",
+                new=AsyncMock(side_effect=RuntimeError("snapshot failed")),
+            ),
+            pytest.raises(RuntimeError, match="snapshot failed"),
+        ):
+            asyncio.run(
+                deduplicate_and_persist_on_connection(
+                    conn,
+                    entity_type="schools",
+                    item={"sch_id": 1, "name": "Test"},
+                    content_hash="abc",
+                    unique_keys={"sch_id": 1},
+                    crawl_task_id=1,
+                    upsert_fn=AsyncMock(return_value=123),
+                )
+            )
+
+        transaction_context.__aexit__.assert_awaited_once()
+        assert transaction_context.__aexit__.await_args.args[0] is RuntimeError
 
     def test_score_segment_batch_records_three_state_snapshots_in_one_transaction(self):
         _, conn, transaction_context = make_mock_pool_and_conn()

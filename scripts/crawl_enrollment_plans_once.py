@@ -21,6 +21,7 @@ from scrapling.fetchers import Fetcher
 
 from gaokao_vault.config import DatabaseConfig
 from gaokao_vault.db.queries.enrollment import upsert_enrollment_plan
+from gaokao_vault.models.enrollment import EnrollmentPlanItem
 from gaokao_vault.pipeline.admission_rules import (
     extract_adjustment_rule,
     extract_eligibility_requirements,
@@ -32,8 +33,10 @@ from gaokao_vault.pipeline.admission_rules import (
     extract_single_subject_limit,
 )
 from gaokao_vault.pipeline.batch_normalizer import normalize_batch
+from gaokao_vault.pipeline.dedup import deduplicate_and_persist_on_connection
 from gaokao_vault.pipeline.hasher import compute_content_hash
 from gaokao_vault.pipeline.quality import missing_field_flags
+from gaokao_vault.pipeline.validator import validate_item
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("crawl_enrollment_plans_once")
@@ -230,46 +233,31 @@ async def persist_plan(
     task_id: int,
     stats: dict[str, int],
 ) -> None:
-    content_hash = compute_content_hash(item)
-    item = {**item, "content_hash": content_hash, "crawl_task_id": task_id}
-    existing = await conn.fetchrow(
-        """
-        SELECT id, content_hash FROM enrollment_plans
-        WHERE school_id=$1 AND province_id=$2 AND year=$3
-          AND subject_category_id IS NOT DISTINCT FROM $4
-          AND batch IS NOT DISTINCT FROM $5
-          AND major_name IS NOT DISTINCT FROM $6
-        """,
-        item["school_id"],
-        item["province_id"],
-        item["year"],
-        item.get("subject_category_id"),
-        item.get("batch"),
-        item.get("major_name"),
-    )
-    entity_id = await upsert_enrollment_plan(conn, item)
-    if existing is None:
-        stats["new"] += 1
-        change = "new"
-    elif existing["content_hash"] == content_hash:
-        stats["unchanged"] += 1
+    validated = validate_item(EnrollmentPlanItem, item)
+    if validated is None:
+        stats["failed"] += 1
         return
-    else:
-        stats["updated"] += 1
-        change = "updated"
-
-    await conn.execute(
-        """
-        INSERT INTO crawl_snapshots
-          (entity_type, entity_id, content_hash, change_type, crawl_task_id, snapshot_data)
-        VALUES ('enrollment_plans', $1, $2, $3, $4, $5::jsonb)
-        """,
-        entity_id,
-        content_hash,
-        change,
-        task_id,
-        json.dumps(item, ensure_ascii=False, default=str),
+    content_hash = compute_content_hash(validated)
+    change = await deduplicate_and_persist_on_connection(
+        conn,
+        entity_type="enrollment_plans",
+        item=validated,
+        content_hash=content_hash,
+        unique_keys={
+            "school_id": validated["school_id"],
+            "province_id": validated["province_id"],
+            "year": validated["year"],
+            "subject_category_id": validated.get("subject_category_id"),
+            "batch": validated.get("batch"),
+            "school_code_raw": validated.get("school_code_raw"),
+            "major_group_code": validated.get("major_group_code"),
+            "major_code_raw": validated.get("major_code_raw"),
+            "major_name": validated.get("major_name"),
+        },
+        crawl_task_id=task_id,
+        upsert_fn=upsert_enrollment_plan,
     )
+    stats[change] += 1
 
 
 def extract_items(payload: dict[str, Any] | None) -> tuple[list[dict[str, Any]], int]:
@@ -395,9 +383,6 @@ async def main() -> int:
             """
             SELECT s.id, s.sch_id, s.name
             FROM schools s
-            WHERE NOT EXISTS (
-                SELECT 1 FROM enrollment_plans e WHERE e.school_id = s.id
-            )
             ORDER BY s.id
             """
         )
@@ -434,7 +419,8 @@ async def main() -> int:
         )
         if not smoke_items:
             raise RuntimeError(
-                f"smoke plan API returned 0 items — aborting (code={(smoke or {}).get('code')} msg={(smoke or {}).get('message')})"
+                "smoke plan API returned 0 items — aborting "
+                f"(code={(smoke or {}).get('code')} msg={(smoke or {}).get('message')})"
             )
 
         matched = 0

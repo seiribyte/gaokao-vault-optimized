@@ -117,7 +117,33 @@ async def deduplicate_and_persist(
     if mapping is None and upsert_fn is None:
         return "failed"
 
-    async with db_pool.acquire() as conn, conn.transaction():
+    async with db_pool.acquire() as conn:
+        return await deduplicate_and_persist_on_connection(
+            conn,
+            entity_type=entity_type,
+            item=item,
+            content_hash=content_hash,
+            unique_keys=unique_keys,
+            crawl_task_id=crawl_task_id,
+            upsert_fn=upsert_fn,
+        )
+
+
+async def deduplicate_and_persist_on_connection(
+    conn: asyncpg.Connection,
+    entity_type: str,
+    item: dict[str, Any],
+    content_hash: str,
+    unique_keys: dict[str, Any],
+    crawl_task_id: int,
+    upsert_fn: UpsertFn | None = None,
+) -> str:
+    """Run canonical deduplication when the caller already owns a connection."""
+    mapping = TABLE_MAP.get(entity_type)
+    if mapping is None and upsert_fn is None:
+        return "failed"
+
+    async with conn.transaction():
         if mapping:
             table, clause, key_fields = mapping
             params = [unique_keys[k] for k in key_fields]
