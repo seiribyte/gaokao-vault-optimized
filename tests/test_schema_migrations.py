@@ -8,6 +8,19 @@ def _normalize_sql(sql: str) -> str:
     return re.sub(r"\s+", " ", sql).strip()
 
 
+def test_reference_seeds_replay_authoritative_fields_on_name_conflict() -> None:
+    provinces_sql = _normalize_sql(Path("src/gaokao_vault/db/seed_provinces.sql").read_text())
+    categories_sql = _normalize_sql(Path("src/gaokao_vault/db/seed_subject_categories.sql").read_text())
+
+    assert "ON CONFLICT (name) DO UPDATE SET code = EXCLUDED.code" in provinces_sql
+    assert "region = EXCLUDED.region" in provinces_sql
+    assert "gaokao_mode = EXCLUDED.gaokao_mode" in provinces_sql
+    assert "gaokao_mode_year = EXCLUDED.gaokao_mode_year" in provinces_sql
+    assert "ON CONFLICT (name) DO UPDATE SET category_type = EXCLUDED.category_type" in categories_sql
+    assert "DO NOTHING" not in provinces_sql
+    assert "DO NOTHING" not in categories_sql
+
+
 def test_enrollment_plans_existing_tables_get_conflict_target_index() -> None:
     schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
 

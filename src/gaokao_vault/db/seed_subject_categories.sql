@@ -55,4 +55,5 @@ INSERT INTO subject_categories (name, category_type) VALUES
 ('畜牧兽医类', 'special'),
 -- the exact category from the bug log
 ('单独考试招生', 'special')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (name) DO UPDATE SET
+    category_type = EXCLUDED.category_type;
