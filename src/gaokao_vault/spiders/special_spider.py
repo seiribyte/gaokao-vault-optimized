@@ -428,8 +428,11 @@ class SpecialSpider(BaseGaokaoSpider):
             unique_keys={
                 "enrollment_type": item.get("enrollment_type"),
                 "school_id": item.get("school_id"),
+                "school_code_raw": item.get("school_code_raw"),
                 "year": item.get("year"),
                 "title": item.get("title", ""),
+                "source_section": item.get("source_section"),
+                "detail_url": item.get("detail_url"),
             },
             upsert_fn=upsert_special_enrollment,
         )

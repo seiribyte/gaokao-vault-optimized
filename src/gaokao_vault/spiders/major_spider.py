@@ -172,12 +172,13 @@ class MajorSpider(BaseGaokaoSpider):
             return
 
         for spec in items:
-            code = spec.get("zydm", "")
-            name = spec.get("zymc", "")
+            code = str(spec.get("zydm") or "").strip()
+            name = str(spec.get("zymc") or "").strip()
             spec_id = spec.get("specId", "")
             satisfaction = spec.get("zymyd", "")
 
-            if not name:
+            if not name or not code:
+                logger.warning("Skipping major with missing stable identity (code=%r name=%r)", code, name)
                 continue
 
             data = {

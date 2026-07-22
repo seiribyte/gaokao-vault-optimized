@@ -27,7 +27,8 @@ TABLE_MAP: dict[str, tuple[str, str, list[str]]] = {
     "major_satisfaction": ("major_satisfaction", "major_id = $1 AND school_id = $2", ["major_id", "school_id"]),
     "score_lines": (
         "admission_score_lines",
-        "province_id = $1 AND year = $2 AND subject_category_id = $3 AND batch = $4 AND special_name IS NOT DISTINCT FROM $5",
+        "province_id = $1 AND year = $2 AND subject_category_id IS NOT DISTINCT FROM $3 "
+        "AND batch = $4 AND special_name IS NOT DISTINCT FROM $5",
         ["province_id", "year", "subject_category_id", "batch", "special_name"],
     ),
     "score_segments": (

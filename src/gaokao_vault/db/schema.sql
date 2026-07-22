@@ -383,6 +383,22 @@ CREATE TABLE IF NOT EXISTS admission_score_lines (
     UNIQUE(province_id, year, subject_category_id, batch, special_name)
 );
 
+ALTER TABLE admission_score_lines
+    DROP CONSTRAINT IF EXISTS admission_score_lines_province_id_year_subject_category_id_batch_special_name_key;
+WITH ranked_score_lines AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+               PARTITION BY province_id, year, subject_category_id, batch, special_name
+               ORDER BY updated_at DESC, id DESC
+           ) AS row_number
+    FROM admission_score_lines
+)
+DELETE FROM admission_score_lines AS current_row
+USING ranked_score_lines AS ranked
+WHERE current_row.id = ranked.id AND ranked.row_number > 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_admission_score_lines_unique_key
+    ON admission_score_lines(province_id, year, subject_category_id, batch, special_name) NULLS NOT DISTINCT;
+
 CREATE INDEX IF NOT EXISTS idx_score_lines_province_year ON admission_score_lines(province_id, year);
 
 DROP TRIGGER IF EXISTS update_admission_score_lines_updated_at ON admission_score_lines;

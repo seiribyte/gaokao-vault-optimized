@@ -24,6 +24,32 @@ def _make_spider() -> SpecialSpider:
     return SpecialSpider(db_config=db_config, crawl_task_id=1)
 
 
+def test_process_special_item_passes_complete_schema_identity() -> None:
+    spider = _make_spider()
+    item = {
+        "enrollment_type": "强基计划",
+        "school_id": 10,
+        "school_code_raw": "92002",
+        "year": 2026,
+        "title": "招生简章",
+        "source_section": "charter",
+        "detail_url": "https://example.invalid/detail/1",
+    }
+
+    with patch.object(spider, "process_item", new=AsyncMock(return_value="new")) as process_item:
+        asyncio.run(spider._process_special_item(item))
+
+    assert process_item.await_args_list[0].kwargs["unique_keys"] == {
+        "enrollment_type": "强基计划",
+        "school_id": 10,
+        "school_code_raw": "92002",
+        "year": 2026,
+        "title": "招生简章",
+        "source_section": "charter",
+        "detail_url": "https://example.invalid/detail/1",
+    }
+
+
 def _make_response(html: str, url: str, meta: dict | None = None) -> MagicMock:
     adaptor = Adaptor(content=html, url=url)
     response = MagicMock()

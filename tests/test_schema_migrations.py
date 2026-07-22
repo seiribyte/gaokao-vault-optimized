@@ -236,3 +236,17 @@ def test_score_segments_use_null_safe_unique_identity_and_cleanup_duplicates() -
     assert "PARTITION BY province_id, year, subject_category_id, score" in schema_sql
     assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_score_segments_unique_key" in schema_sql
     assert "ON score_segments(province_id, year, subject_category_id, score) NULLS NOT DISTINCT" in schema_sql
+
+
+def test_score_lines_use_null_safe_unique_identity_and_cleanup_duplicates() -> None:
+    schema_sql = _normalize_sql(Path("src/gaokao_vault/db/schema.sql").read_text())
+
+    assert (
+        "DROP CONSTRAINT IF EXISTS admission_score_lines_province_id_year_subject_category_id_batch_special_name_key"
+        in schema_sql
+    )
+    assert "PARTITION BY province_id, year, subject_category_id, batch, special_name" in schema_sql
+    assert (
+        "ON admission_score_lines(province_id, year, subject_category_id, batch, special_name) NULLS NOT DISTINCT"
+        in schema_sql
+    )
