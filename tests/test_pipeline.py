@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -75,6 +76,17 @@ class TestValidator:
         }
         result = validate_item(ScoreLineItem, data)
         assert result is None
+
+    def test_invalid_item_log_redacts_raw_input_values(self, caplog):
+        secret = "=".join(("token", "super" + "-secret-value"))
+        with caplog.at_level(logging.WARNING, logger="gaokao_vault.pipeline.validator"):
+            result = validate_item(ScoreLineItem, {"province_id": secret, "year": 2024, "batch": "本科一批"})
+
+        assert result is None
+        assert secret not in caplog.text
+        assert "ScoreLineItem" in caplog.text
+        assert "province_id" in caplog.text
+        assert "int_parsing" in caplog.text
 
     def test_school_defaults(self):
         data = {"sch_id": 42, "name": "Test U"}

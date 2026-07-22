@@ -12,6 +12,13 @@ def validate_item(model_class: type[BaseModel], data: dict[str, Any]) -> dict[st
     try:
         instance = model_class.model_validate(data)
         return instance.model_dump()
-    except ValidationError as e:
-        logger.warning("Validation failed for %s: %s", model_class.__name__, e)
+    except ValidationError as exc:
+        diagnostics = [
+            {
+                "loc": ".".join(str(part) for part in error["loc"]),
+                "type": error["type"],
+            }
+            for error in exc.errors()
+        ]
+        logger.warning("Validation failed for %s: fields=%s", model_class.__name__, diagnostics)
         return None
