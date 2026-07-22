@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 from typing import TYPE_CHECKING, Any, cast
 
 from gaokao_vault.config import ProxyConfig
@@ -12,6 +13,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _manager: ProxyPoolManager | None = None
+_manager_config: ProxyConfig | None = None
 
 
 def _sanitize_proxy(proxy: str) -> str:
@@ -31,8 +33,11 @@ class ProxyPoolManager:
         self._paid_proxies: list[str] = list(config.static_proxies)
         self._free_proxies: list[str] = []
         self._use_freeproxy: bool = config.use_freeproxy
+        self._refresh_interval_seconds = config.refresh_interval_min * 60
+        self._last_refresh: float | None = None
 
     def refresh_free_proxies(self) -> None:
+        self._last_refresh = time.monotonic()
         if not self._use_freeproxy:
             return
         try:
@@ -57,6 +62,10 @@ class ProxyPoolManager:
             logger.warning("pyfreeproxy not installed, skipping free proxy refresh")
         except Exception:
             logger.warning("Free proxy refresh failed, continuing without free proxies", exc_info=True)
+
+    def refresh_if_due(self) -> None:
+        if self._last_refresh is None or time.monotonic() - self._last_refresh >= self._refresh_interval_seconds:
+            self.refresh_free_proxies()
 
     def get_rotator(self) -> ProxyRotator | None:
         from scrapling.fetchers import ProxyRotator
@@ -83,10 +92,12 @@ class ProxyPoolManager:
 
 
 def _get_manager(config: ProxyConfig | None = None) -> ProxyPoolManager:
-    global _manager
-    if _manager is None:
-        _manager = ProxyPoolManager(config)
-        _manager.refresh_free_proxies()
+    global _manager, _manager_config
+    if _manager is None or (config is not None and config != _manager_config):
+        resolved_config = config or ProxyConfig()
+        _manager = ProxyPoolManager(resolved_config)
+        _manager_config = resolved_config.model_copy(deep=True)
+    _manager.refresh_if_due()
     return _manager
 
 

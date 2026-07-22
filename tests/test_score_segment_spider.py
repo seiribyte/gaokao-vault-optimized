@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from scrapling.parser import Adaptor
 
-from gaokao_vault.config import DatabaseConfig
+from gaokao_vault.config import CrawlConfig, DatabaseConfig
 from gaokao_vault.spiders.base import BaseGaokaoSpider
 from gaokao_vault.spiders.dxsbb_score_segments import DxsbbSegmentRecord
 from gaokao_vault.spiders.score_segment_spider import (
@@ -318,3 +318,19 @@ def test_on_close_records_pending_rows_and_runs_base_cleanup_when_retry_fails() 
 
     assert spider._stats["failed"] == 2
     base_close.assert_awaited_once_with()
+
+
+def test_on_start_uses_configured_batch_size() -> None:
+    spider = _make_spider()
+    spider._crawl_config = CrawlConfig(batch_size=37)
+    pool = MagicMock()
+    batch_sink = MagicMock()
+
+    with (
+        patch.object(spider, "_get_pool", new=AsyncMock(return_value=pool)),
+        patch("gaokao_vault.spiders.score_segment_spider.BatchSink", return_value=batch_sink) as sink_cls,
+    ):
+        asyncio.run(spider.on_start())
+
+    assert spider._sink is batch_sink
+    assert sink_cls.call_args.kwargs["batch_size"] == 37

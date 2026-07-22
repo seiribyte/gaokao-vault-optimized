@@ -83,7 +83,7 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
         self._sink = BatchSink(
             pool=pool,
             flush_fn=self._flush_batch,
-            batch_size=500,
+            batch_size=self._crawl_config.batch_size,
         )
 
     async def _flush_batch(self, conn, rows):
@@ -102,7 +102,7 @@ class ScoreSegmentSpider(BaseGaokaoSpider):
                 mode=self.mode,
                 full_start_year=YEAR_START,
                 current_year=YEAR_END,
-                target_start_year=self._crawl_config.target_year_start,
+                target_start_year=self._crawl_config.effective_year_start,
                 target_end_year=self._crawl_config.target_year_end,
             )
         )

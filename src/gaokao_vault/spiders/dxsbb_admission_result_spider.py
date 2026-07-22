@@ -157,7 +157,7 @@ class DxsbbAdmissionResultSpider(BaseGaokaoSpider):
         major_name = _cell_text(cells, _column_index(header_map, ("专业名称", "专业")))
         if year is None or not major_name:
             return None
-        if self._crawl_config.target_year_start is not None and year < self._crawl_config.target_year_start:
+        if year < self._crawl_config.effective_year_start:
             return None
         if self._crawl_config.target_year_end is not None and year > self._crawl_config.target_year_end:
             return None

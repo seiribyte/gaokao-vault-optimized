@@ -22,6 +22,11 @@ class TestConfig:
         assert config.school_major_min_ready_schools == 100
         assert config.school_major_min_ready_majors == 100
         assert 0 < config.jitter_ratio < 1
+        assert config.effective_year_start == config.year_start
+
+    def test_crawl_config_target_year_overrides_default_lower_bound(self):
+        config = CrawlConfig(year_start=2015, target_year_start=2024)
+        assert config.effective_year_start == 2024
 
     def test_crawl_config_accepts_school_major_readiness_threshold_env(self, monkeypatch):
         monkeypatch.setenv("GAOKAO_CRAWL__SCHOOL_MAJOR_MIN_READY_SCHOOLS", "2800")

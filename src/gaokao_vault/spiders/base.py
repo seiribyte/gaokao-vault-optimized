@@ -55,13 +55,17 @@ class BaseGaokaoSpider(Spider):
         **kwargs,
     ):
         self._crawl_config = config or CrawlConfig()
+        self._proxy_config = app_config.proxy if app_config is not None else None
         # Set _rs_wait_ms BEFORE super().__init__() because it calls
         # configure_sessions() which reads self._rs_wait_ms.
-        self._rs_wait_ms = 10000  # default RS wait
-        self._browser_timeout_ms = 120000  # default browser navigation timeout
+        self._rs_wait_ms = self._crawl_config.rs_wait_ms
+        self._browser_timeout_ms = self._crawl_config.browser_timeout_ms
         if config:
-            self._rs_wait_ms = self._crawl_config.rs_wait_ms
-            self._browser_timeout_ms = self._crawl_config.browser_timeout_ms
+            self.concurrent_requests = self._crawl_config.concurrency
+            self.concurrent_requests_per_domain = self._crawl_config.concurrency_per_domain
+            self.download_delay = self._crawl_config.base_delay
+            if "max_blocked_retries" in self._crawl_config.model_fields_set:
+                self.max_blocked_retries = self._crawl_config.max_blocked_retries
 
         super().__init__(**kwargs)
         self._db_config = db_config
@@ -74,11 +78,6 @@ class BaseGaokaoSpider(Spider):
         self._last_heartbeat: float = time.monotonic()
         self._heartbeat_interval: int = self._crawl_config.heartbeat_interval
         self._items_since_heartbeat: int = 0
-
-        if config:
-            self.concurrent_requests = self._crawl_config.concurrency
-            self.concurrent_requests_per_domain = self._crawl_config.concurrency_per_domain
-            self.download_delay = self._crawl_config.base_delay
 
     async def _get_pool(self) -> asyncpg.Pool:
         """Lazily create a local asyncpg pool bound to the current event loop."""
@@ -127,8 +126,8 @@ class BaseGaokaoSpider(Spider):
         return sc_id
 
     def configure_sessions(self, manager) -> None:
-        rotator = get_proxy_rotator()
-        proxy_diagnostics = get_proxy_diagnostics()
+        rotator = get_proxy_rotator(self._proxy_config)
+        proxy_diagnostics = get_proxy_diagnostics(self._proxy_config)
         if proxy_diagnostics["total_count"] == 0:
             logger.warning(
                 "Network path: direct egress via host IP (use_freeproxy=%s paid=%d free=%d total=%d)",
@@ -178,7 +177,7 @@ class BaseGaokaoSpider(Spider):
                 extra_headers={"Referer": "https://gaokao.chsi.com.cn/"},
                 additional_args={"viewport": {"width": 1366, "height": 768}},
                 impersonate=cast(Any, IMPERSONATE_LIST),
-                proxy_rotator=rotator if rotator is not None else get_proxy_rotator(),
+                proxy_rotator=rotator if rotator is not None else get_proxy_rotator(self._proxy_config),
             ),
             lazy=True,
         )

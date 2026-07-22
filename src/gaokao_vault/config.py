@@ -43,6 +43,10 @@ class CrawlConfig(BaseSettings):
     target_year_start: int | None = None
     target_year_end: int | None = None
 
+    @property
+    def effective_year_start(self) -> int:
+        return self.target_year_start if self.target_year_start is not None else self.year_start
+
 
 class ScheduleConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GAOKAO_SCHEDULE__")

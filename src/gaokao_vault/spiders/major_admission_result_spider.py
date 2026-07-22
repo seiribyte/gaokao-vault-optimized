@@ -173,7 +173,7 @@ class MajorAdmissionResultSpider(BaseGaokaoSpider):
             mode=self.mode,
             full_start_year=_YEAR_START,
             current_year=_YEAR_END,
-            target_start_year=self._crawl_config.target_year_start,
+            target_start_year=self._crawl_config.effective_year_start,
             target_end_year=self._crawl_config.target_year_end,
         )
 

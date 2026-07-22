@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from scrapling.spiders import Request, SessionManager
 
-from gaokao_vault.config import DatabaseConfig
+from gaokao_vault.config import AppConfig, CrawlConfig, DatabaseConfig, ProxyConfig
 from gaokao_vault.constants import TaskType
 from gaokao_vault.scheduler.orchestrator import SPIDER_MAP
 from gaokao_vault.spiders import (
@@ -32,6 +32,33 @@ from gaokao_vault.spiders.provincial_announcement_spider import ProvincialAnnoun
 
 
 class TestSpiderStructure:
+    def test_explicit_retry_and_proxy_config_are_applied_before_sessions(self):
+        crawl_config = CrawlConfig(max_blocked_retries=9, concurrency=4, base_delay=0.25)
+        app_config = AppConfig(proxy=ProxyConfig(static_proxies=["http://proxy.invalid:8080"], use_freeproxy=False))
+        diagnostics = {
+            "total_count": 1,
+            "use_freeproxy": False,
+            "paid_count": 1,
+            "free_count": 0,
+            "sample_proxies": ["http://proxy.invalid:8080"],
+        }
+
+        with (
+            patch("gaokao_vault.spiders.base.get_proxy_rotator", return_value=None) as get_rotator,
+            patch("gaokao_vault.spiders.base.get_proxy_diagnostics", return_value=diagnostics),
+        ):
+            spider = BaseGaokaoSpider(
+                db_config=DatabaseConfig(),
+                crawl_task_id=1,
+                config=crawl_config,
+                app_config=app_config,
+            )
+
+        assert spider.max_blocked_retries == 9
+        assert spider.concurrent_requests == 4
+        assert spider.download_delay == 0.25
+        get_rotator.assert_called_with(app_config.proxy)
+
     def test_session_overrides_register_blocked_retry_target(self):
         db_config = DatabaseConfig(
             dsn="postgresql://test:test@localhost:5432/test_db",
